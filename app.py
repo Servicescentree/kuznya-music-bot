@@ -1,40 +1,38 @@
 import os
 import time
-import html
 import logging
-import sqlite3
-from threading import Thread
-from typing import Optional, Dict, Any
-from dataclasses import dataclass
-from contextlib import contextmanager
-
 import telebot
 from telebot import types
-from flask import Flask, request, jsonify
-from dotenv import load_dotenv
+from flask import Flask, jsonify
+from threading import Thread
 
-# Load environment variables
-load_dotenv()
+# Налаштування логування
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Configuration
-@dataclass
-class BotConfig:
-    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAFPu81rvI7ISpmtixdgD1cOybAQ6T_rMjI')
-    ADMIN_ID: int = 7276479457
-    CHANNEL_URL: str = 'https://t.me/kuznya_music'
-    EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
-    DATABASE_PATH: str = 'bot_data.db'
-    WEBHOOK_PORT: int = int(os.getenv('PORT', 8080))
-    MAX_MESSAGE_LENGTH: int = 4000
-    RATE_LIMIT_MESSAGES: int = 5
+# Конфігурація
+BOT_TOKEN = os.getenv('BOT_TOKEN', 'your_token_here')
+ADMIN_ID = int(os.getenv('ADMIN_ID', '7276479457'))
+PORT = int(os.getenv('PORT', 8080))
 
-# Text messages
-class Messages:
-    WELCOME = """Привіт, {}! 👋
+# Ініціалізація бота
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# Стани користувачів (простий словник замість БД)
+user_states = {}
+
+# Константи
+CHANNEL_URL = 'https://t.me/kuznya_music'
+EXAMPLES_URL = 'https://t.me/kuznya_music/41'
+
+# Повідомлення
+MESSAGES = {
+    'welcome': """Привіт, {}! 👋
 Ласкаво просимо до музичної студії Kuznya Music!
-Оберіть дію з меню:"""
+
+Оберіть дію з меню:""",
     
-    RECORDING_PROMPT = """🎤 *Запис треку*
+    'recording_prompt': """🎤 *Запис треку*
 
 Опишіть ваші побажання:
 • Запис, Зведення
@@ -42,131 +40,264 @@ class Messages:
 • Референси (приклади)
 • Терміни (коли хочете записатись)
 
-_Ваше повідомлення буде передано адміністратору_"""
+_Ваше повідомлення буде передано адміністратору_""",
     
-    EXAMPLES_INFO = """🎵 *Наші роботи:*
-{}
-Тут ви знайдете найкращі зразки нашої творчості!"""
+    'examples_info': f"""🎵 *Наші роботи:*
+
+Послухати приклади можна тут:
+{EXAMPLES_URL}
+
+Тут ви знайдете найкращі зразки нашої творчості!""",
     
-    CHANNEL_INFO = """📢 *Підписуйтесь на наш канал:*
-{}
+    'channel_info': f"""📢 *Підписуйтесь на наш канал:*
+
+{CHANNEL_URL}
+
 Там ви знайдете:
 • Нові роботи
 • Закулісся студії
-• Акції та знижки"""
+• Акції та знижки""",
     
-    CONTACTS_INFO = """📲 *Контакти студії:*
+    'contacts_info': """📲 *Контакти студії:*
+
 Telegram: @kuznya_music
-Або використовуйте кнопку '🎤 Записати трек' для прямого зв'язку"""
+Або використовуйте кнопку '🎤 Записати трек' для прямого зв'язку""",
     
-    MESSAGE_SENT = """✅ Повідомлення відправлено адміністратору!
+    'message_sent': """✅ Повідомлення відправлено адміністратору!
 Очікуйте відповіді...
-_Ви можете відправити додаткові повідомлення або завершити діалог_"""
+
+_Ви можете відправити додаткові повідомлення або завершити діалог_""",
     
-    DIALOG_ENDED = "✅ Діалог завершено. Повертаємося до головного меню."
-    ADMIN_REPLY = "💬 *Відповідь від адміністратора:*\n\n{}"
-    USE_MENU_BUTTONS = "🤔 Використовуйте кнопки меню для навігації"
-    
-    # Error messages
-    ERROR_SEND_FAILED = "❌ Помилка при відправці повідомлення. Спробуйте пізніше."
-    ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {BotConfig.MAX_MESSAGE_LENGTH} символів."
-    ERROR_RATE_LIMITED = "❌ Забагато повідомлень. Зачекайте хвилинку."
-    ERROR_INVALID_INPUT = "❌ Некоректне повідомлення. Спробуйте ще раз."
+    'dialog_ended': "✅ Діалог завершено. Повертаємося до головного меню."
+}
 
-# User states
-class UserStates:
-    IDLE = 'idle'
-    WAITING_FOR_MESSAGE = 'waiting_for_message'
-    ADMIN_REPLYING = 'admin_replying'
+# Клавіатури
+def get_main_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add(
+        types.KeyboardButton("🎤 Записати трек"),
+        types.KeyboardButton("🎧 Приклади робіт")
+    )
+    markup.add(
+        types.KeyboardButton("📢 Підписатися"),
+        types.KeyboardButton("📲 Контакти")
+    )
+    return markup
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+def get_chat_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(types.KeyboardButton("❌ Завершити діалог"))
+    return markup
 
-# Initialize bot
-config = BotConfig()
-bot = telebot.TeleBot(config.TOKEN)
-
-# Database setup
-def init_database():
-    with sqlite3.connect(config.DATABASE_PATH) as conn:
-        conn.execute('''CREATE TABLE IF NOT EXISTS user_states (
-                user_id INTEGER PRIMARY KEY,
-                state TEXT DEFAULT 'idle',
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS user_sessions (
-                user_id INTEGER PRIMARY KEY,
-                admin_message_id INTEGER,
-                user_message_id INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS rate_limits (
-                user_id INTEGER PRIMARY KEY,
-                message_count INTEGER DEFAULT 0,
-                last_reset TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )''')
-        conn.commit()
-
-@contextmanager
-def get_db_connection():
-    conn = sqlite3.connect(config.DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
+# Обробники команд
+@bot.message_handler(commands=['start'])
+def handle_start(message):
     try:
-        yield conn
-    finally:
-        conn.close()
+        user_id = message.from_user.id
+        user_states[user_id] = 'idle'
+        
+        first_name = message.from_user.first_name or "друже"
+        markup = get_main_keyboard()
+        
+        bot.send_message(
+            message.chat.id,
+            MESSAGES['welcome'].format(first_name),
+            reply_markup=markup
+        )
+        logger.info(f"User {user_id} started bot")
+    except Exception as e:
+        logger.error(f"Error in start: {e}")
 
-# DatabaseManager, validate_message, sanitize_input, keyboards, helper functions, handlers
-# копіюємо їх без змін з твого коду
+@bot.message_handler(func=lambda message: message.text == "🎤 Записати трек")
+def handle_recording(message):
+    try:
+        user_id = message.from_user.id
+        user_states[user_id] = 'waiting_message'
+        
+        markup = get_chat_keyboard()
+        bot.send_message(
+            message.chat.id,
+            MESSAGES['recording_prompt'],
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        logger.info(f"User {user_id} started recording mode")
+    except Exception as e:
+        logger.error(f"Error in recording: {e}")
 
-# Flask app
-app = Flask('')
+@bot.message_handler(func=lambda message: message.text == "🎧 Приклади робіт")
+def handle_examples(message):
+    try:
+        bot.send_message(
+            message.chat.id,
+            MESSAGES['examples_info'],
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error in examples: {e}")
 
-bot_start_time = time.time()
+@bot.message_handler(func=lambda message: message.text == "📢 Підписатися")
+def handle_channel(message):
+    try:
+        bot.send_message(
+            message.chat.id,
+            MESSAGES['channel_info'],
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error in channel: {e}")
+
+@bot.message_handler(func=lambda message: message.text == "📲 Контакти")
+def handle_contacts(message):
+    try:
+        bot.send_message(
+            message.chat.id,
+            MESSAGES['contacts_info'],
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error in contacts: {e}")
+
+@bot.message_handler(func=lambda message: message.text == "❌ Завершити діалог")
+def handle_end_dialog(message):
+    try:
+        user_id = message.from_user.id
+        user_states[user_id] = 'idle'
+        
+        markup = get_main_keyboard()
+        bot.send_message(
+            message.chat.id,
+            MESSAGES['dialog_ended'],
+            reply_markup=markup
+        )
+        logger.info(f"User {user_id} ended dialog")
+    except Exception as e:
+        logger.error(f"Error in end dialog: {e}")
+
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == 'waiting_message')
+def handle_user_message(message):
+    try:
+        user = message.from_user
+        user_id = user.id
+        
+        # Формуємо повідомлення для адміна
+        admin_text = f"""💬 *Нове повідомлення від клієнта*
+
+👤 *Клієнт:* {user.first_name or ''} {user.last_name or ''}
+🆔 *Username:* @{user.username or 'немає'}
+🆔 *ID:* {user_id}
+⏰ *Час:* {time.strftime('%H:%M %d.%m.%Y')}
+
+📝 *Повідомлення:*
+{message.text}"""
+        
+        # Створюємо кнопку відповіді
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton(
+            "✍️ Відповісти", 
+            callback_data=f"reply_{user_id}"
+        ))
+        
+        # Відправляємо адміну
+        bot.send_message(
+            ADMIN_ID,
+            admin_text,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+        # Підтверджуємо користувачу
+        bot.send_message(message.chat.id, MESSAGES['message_sent'])
+        
+        logger.info(f"Message forwarded from user {user_id} to admin")
+        
+    except Exception as e:
+        logger.error(f"Error forwarding message: {e}")
+        bot.send_message(message.chat.id, "❌ Помилка при відправці. Спробуйте пізніше.")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('reply_'))
+def handle_admin_reply_callback(call):
+    try:
+        if call.from_user.id != ADMIN_ID:
+            bot.answer_callback_query(call.id, "❌ Немає доступу")
+            return
+        
+        user_id = int(call.data.split('_')[1])
+        user_states[ADMIN_ID] = f'replying_{user_id}'
+        
+        bot.answer_callback_query(call.id, "Напишіть відповідь наступним повідомленням")
+        bot.send_message(
+            ADMIN_ID,
+            f"✍️ Напишіть відповідь клієнту (ID: {user_id}):\n\n_Наступне повідомлення буде відправлено клієнту_",
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in reply callback: {e}")
+
+@bot.message_handler(func=lambda message: message.from_user.id == ADMIN_ID and user_states.get(ADMIN_ID, '').startswith('replying_'))
+def handle_admin_reply(message):
+    try:
+        admin_state = user_states.get(ADMIN_ID, '')
+        target_user_id = int(admin_state.split('_')[1])
+        
+        # Відправляємо відповідь користувачу
+        reply_text = f"💬 *Відповідь від адміністратора:*\n\n{message.text}"
+        bot.send_message(target_user_id, reply_text, parse_mode='Markdown')
+        
+        # Підтверджуємо адміну
+        bot.send_message(ADMIN_ID, f"✅ Відповідь відправлено клієнту (ID: {target_user_id})")
+        
+        # Скидаємо стан адміна
+        user_states[ADMIN_ID] = 'idle'
+        
+        logger.info(f"Admin replied to user {target_user_id}")
+        
+    except Exception as e:
+        logger.error(f"Error in admin reply: {e}")
+        bot.send_message(ADMIN_ID, "❌ Помилка при відправці відповіді")
+        user_states[ADMIN_ID] = 'idle'
+
+@bot.message_handler(func=lambda message: True)
+def handle_other_messages(message):
+    try:
+        if user_states.get(message.from_user.id, 'idle') == 'idle':
+            markup = get_main_keyboard()
+            bot.send_message(
+                message.chat.id,
+                "🤔 Використовуйте кнопки меню для навігації",
+                reply_markup=markup
+            )
+    except Exception as e:
+        logger.error(f"Error in other messages: {e}")
+
+# Flask для health check
+app = Flask(__name__)
 
 @app.route('/')
-def health_check():
-    uptime_seconds = int(time.time() - bot_start_time)
-    uptime_hours = uptime_seconds // 3600
-    uptime_minutes = (uptime_seconds % 3600) // 60
-    return f"<h1>🎵 Kuznya Music Studio Bot</h1><p>✅ Активний</p><p>Uptime: {uptime_hours}год {uptime_minutes}хв</p>"
+def home():
+    return "🎵 Kuznya Music Bot is running!"
 
-# Webhook endpoint
-@app.route(f'/{config.TOKEN}', methods=['POST'])
-def receive_update():
-    json_str = request.get_data().decode("UTF-8")
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return "ok", 200
-
-@app.route('/keepalive')
-def keep_alive():
-    return jsonify({"message": "Bot is alive!", "uptime": int(time.time() - bot_start_time)})
+@app.route('/health')
+def health():
+    return jsonify({"status": "healthy", "timestamp": time.time()})
 
 def run_flask():
-    app.run(host='0.0.0.0', port=config.WEBHOOK_PORT, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=PORT)
 
-# Main execution
+# Запуск
 if __name__ == "__main__":
-    init_database()
-    logger.info("Database initialized successfully")
-
-    flask_thread = Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    logger.info(f"Flask server started on port {config.WEBHOOK_PORT}")
-
-    WEBHOOK_URL = f"https://services.freevps.xyz/{config.TOKEN}"
-    bot.remove_webhook()
-    time.sleep(1)
-    bot.set_webhook(url=WEBHOOK_URL)
-    logger.info(f"Webhook set to {WEBHOOK_URL}")
-
-    logger.info("🎵 Music Studio Bot started successfully! Вебхук активований")
+    try:
+        # Запускаємо Flask в окремому потоці
+        flask_thread = Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        
+        logger.info(f"Flask server started on port {PORT}")
+        logger.info("🎵 Music Studio Bot started!")
+        logger.info(f"Admin ID: {ADMIN_ID}")
+        
+        # Запускаємо бота
+        bot.polling(none_stop=True, interval=1, timeout=30)
+        
+    except Exception as e:
+        logger.error(f"Critical error: {e}")
