@@ -622,7 +622,7 @@ if __name__ == "__main__":
         # Start polling with restart on conflict
         while True:
             try:
-                bot.polling(none_stop=True, interval=1, timeout=30, restart_on_change=True)
+                bot.polling(none_stop=True, interval=1, timeout=30)
             except telebot.apihelper.ApiTelegramException as api_error:
                 if "409" in str(api_error) or "Conflict" in str(api_error):
                     logger.warning("Conflict detected - another bot instance running. Retrying in 10 seconds...")
