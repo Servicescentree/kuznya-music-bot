@@ -268,7 +268,7 @@ def handle_show_examples(message):
         
         bot.send_message(
             message.chat.id,
-            "🎵 Наші роботи:\n\nТут ви знайдете найкращі зразки нашої творчості!",
+            "🎵 Наші роботи:\n\nПриклади: Аранжування 🎹 | Зведення 🎧 | Мастерингу 🔊",
             reply_markup=markup
         )
         logger.info(f"Examples message sent successfully to {message.from_user.id}")
