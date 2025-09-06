@@ -259,10 +259,17 @@ def handle_start_recording(message):
 def handle_show_examples(message):
     """Show examples of work."""
     try:
+        # Create inline button instead of plain text with URL
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton(
+            "До прикладів 🎧",
+            url=config.EXAMPLES_URL
+        ))
+        
         bot.send_message(
             message.chat.id,
-            Messages.EXAMPLES_INFO.format(config.EXAMPLES_URL),
-            disable_web_page_preview=False
+            "🎵 Наші роботи:\n\nТут ви знайдете найкращі зразки нашої творчості!",
+            reply_markup=markup
         )
         logger.info(f"Examples message sent successfully to {message.from_user.id}")
     except Exception as e:
