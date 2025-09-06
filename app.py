@@ -288,6 +288,8 @@ def run_flask():
 # Запуск
 if __name__ == "__main__":
     try:
+        if __name__ == "__main__":
+    try:
         # Запускаємо Flask в окремому потоці
         flask_thread = Thread(target=run_flask, daemon=True)
         flask_thread.start()
@@ -296,8 +298,12 @@ if __name__ == "__main__":
         logger.info("🎵 Music Studio Bot started!")
         logger.info(f"Admin ID: {ADMIN_ID}")
         
+        # Видаляємо webhook перед запуском
+        bot.remove_webhook()
+        
         # Запускаємо бота
         bot.polling(none_stop=True, interval=1, timeout=30)
         
     except Exception as e:
         logger.error(f"Critical error: {e}")
+
