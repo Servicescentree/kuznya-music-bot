@@ -253,8 +253,10 @@ def handle_show_examples(message):
         bot.send_message(
             message.chat.id,
             Messages.EXAMPLES_INFO.format(config.EXAMPLES_URL),
-            parse_mode='Markdown'
+            parse_mode='Markdown',
+            disable_web_page_preview=False
         )
+        logger.info(f"Examples message sent successfully to {message.from_user.id}")
     except Exception as e:
         logger.error(f"Error in handle_show_examples: {e}")
         bot.send_message(message.chat.id, Messages.ERROR_SEND_FAILED)
@@ -265,25 +267,16 @@ def handle_show_channel(message):
     try:
         logger.info(f"User {message.from_user.id} requested channel info")
         
-        response_text = f"""📢 *Підписуйтесь на наш канал:*
-
-{config.CHANNEL_URL}
-
-Там ви знайдете:
-• Нові роботи
-• Закулісся студії
-• Акції та знижки"""
-        
         bot.send_message(
             message.chat.id,
-            response_text,
+            Messages.CHANNEL_INFO.format(config.CHANNEL_URL),
             parse_mode='Markdown',
             disable_web_page_preview=False
         )
         logger.info(f"Channel message sent successfully to {message.from_user.id}")
     except Exception as e:
         logger.error(f"Error in handle_show_channel: {e}")
-        bot.send_message(message.chat.id, f"❌ Помилка при відправці повідомлення: {str(e)}")
+        bot.send_message(message.chat.id, Messages.ERROR_SEND_FAILED)
 
 @bot.message_handler(func=lambda message: message.text == "📲 Контакти")
 def handle_show_contacts(message):
