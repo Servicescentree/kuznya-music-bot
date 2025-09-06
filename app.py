@@ -19,7 +19,7 @@ from flask import Flask, jsonify
 # Configuration
 @dataclass
 class BotConfig:
-    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAE-PzjFjHn540-F9HJPEL9p3A-T9enawnY')
+    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAFPu81rvI7ISpmtixdgD1cOybAQ6T_rMjI')
     ADMIN_ID: int = int(os.getenv('ADMIN_ID', '7276479457'))
     CHANNEL_URL: str = 'https://t.me/kuznya_music'
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
@@ -103,7 +103,16 @@ if not config.TOKEN or not config.ADMIN_ID:
     exit(1)
 
 # Initialize bot
-bot = telebot.TeleBot(config.TOKEN)
+try:
+    bot = telebot.TeleBot(config.TOKEN)
+    # Test token immediately
+    logger.info("Testing bot token...")
+    bot_info = bot.get_me()
+    logger.info(f"Bot token is valid! Bot name: {bot_info.first_name} (@{bot_info.username})")
+except Exception as token_error:
+    logger.error(f"Invalid bot token: {token_error}")
+    logger.error(f"Token used: {config.TOKEN}")
+    exit(1)
 
 # In-memory storage instead of SQLite (Render-friendly)
 user_states = {}  # user_id: state
