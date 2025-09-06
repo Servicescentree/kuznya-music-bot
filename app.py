@@ -603,20 +603,50 @@ if __name__ == "__main__":
         logger.info(f"  - Ping: http://localhost:{config.WEBHOOK_PORT}/ping")
         logger.info(f"  - Status: http://localhost:{config.WEBHOOK_PORT}/status")
         
-        # Remove webhook and start bot
-        logger.info("Removing webhook...")
-        bot.remove_webhook()
-        time.sleep(2)
+        # Clear any previous polling/webhooks
+        logger.info("Clearing previous bot instances...")
+        try:
+            bot.remove_webhook()
+            bot.stop_polling()
+        except Exception as clear_error:
+            logger.warning(f"Error clearing previous instances: {clear_error}")
         
-        # Start bot
+        # Wait longer to ensure cleanup
+        time.sleep(5)
+        
+        # Start bot with error handling
         logger.info("🎵 Music Studio Bot started successfully!")
         logger.info(f"Admin ID: {config.ADMIN_ID}")
         logger.info("Bot is polling for messages...")
         
-        bot.polling(none_stop=True, interval=1, timeout=30)
+        # Start polling with restart on conflict
+        while True:
+            try:
+                bot.polling(none_stop=True, interval=1, timeout=30, restart_on_change=True)
+            except telebot.apihelper.ApiTelegramException as api_error:
+                if "409" in str(api_error) or "Conflict" in str(api_error):
+                    logger.warning("Conflict detected - another bot instance running. Retrying in 10 seconds...")
+                    time.sleep(10)
+                    try:
+                        bot.stop_polling()
+                        bot.remove_webhook()
+                    except:
+                        pass
+                    time.sleep(5)
+                    continue
+                else:
+                    raise api_error
         
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
+        try:
+            bot.stop_polling()
+        except:
+            pass
     except Exception as e:
         logger.critical(f"Critical error: {e}")
+        try:
+            bot.stop_polling()
+        except:
+            pass
         exit(1)
