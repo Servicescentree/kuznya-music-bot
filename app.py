@@ -291,8 +291,8 @@ def handle_show_contacts(message):
     try:
         bot.send_message(
             message.chat.id,
-            Messages.CONTACTS_INFO,
-            parse_mode='Markdown'
+            Messages.CONTACTS_INFO
+            # Removed parse_mode to fix markdown parsing error
         )
     except Exception as e:
         logger.error(f"Error in handle_show_contacts: {e}")
