@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Конфігурація
-BOT_TOKEN = os.getenv('BOT_TOKEN', 'your_token_here')
+BOT_TOKEN = os.getenv('8368212048:AAFPu81rvI7ISpmtixdgD1cOybAQ6T_rMjI')
 ADMIN_ID = int(os.getenv('ADMIN_ID', '7276479457'))
 PORT = int(os.getenv('PORT', 8080))
 
