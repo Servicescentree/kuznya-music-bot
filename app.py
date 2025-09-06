@@ -253,7 +253,6 @@ def handle_show_examples(message):
         bot.send_message(
             message.chat.id,
             Messages.EXAMPLES_INFO.format(config.EXAMPLES_URL),
-            parse_mode='Markdown',
             disable_web_page_preview=False
         )
         logger.info(f"Examples message sent successfully to {message.from_user.id}")
@@ -270,7 +269,6 @@ def handle_show_channel(message):
         bot.send_message(
             message.chat.id,
             Messages.CHANNEL_INFO.format(config.CHANNEL_URL),
-            parse_mode='Markdown',
             disable_web_page_preview=False
         )
         logger.info(f"Channel message sent successfully to {message.from_user.id}")
