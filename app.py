@@ -611,6 +611,12 @@ if __name__ == "__main__":
         flask_thread = Thread(target=run_flask, daemon=True)
         flask_thread.start()
         logger.info(f"Flask server started on port {config.WEBHOOK_PORT}")
+        
+        # Start self-ping in separate thread
+        self_ping_thread = Thread(target=self_ping, daemon=True)
+        self_ping_thread.start()
+        logger.info("🔄 Self-ping system started - will ping every 10 minutes")
+        
         logger.info("Health check endpoints available:")
         logger.info(f"  - Main: http://localhost:{config.WEBHOOK_PORT}/")
         logger.info(f"  - Health: http://localhost:{config.WEBHOOK_PORT}/health")
