@@ -21,7 +21,7 @@ from flask import Flask, jsonify
 # Configuration
 @dataclass
 class BotConfig:
-    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAFPu81rvI7ISpmtixdgD1cOybAQ6T_rMjI')
+    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAE-PzjFjHn540-F9HJPEL9p3A-T9enawnY')
     ADMIN_ID: int = int(os.getenv('ADMIN_ID', '7276479457'))
     CHANNEL_URL: str = 'https://t.me/kuznya_music'
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
@@ -1444,3 +1444,4 @@ if __name__ == "__main__":
         except:
             pass
         exit(1)
+
