@@ -446,7 +446,7 @@ def health():
             "version": "3.0-admin-panel"
         }), 200
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error(f"Health check failed: {e}")  # коротко, без traceback
         return jsonify({
             "status": "error",
             "error": str(e),
@@ -470,7 +470,7 @@ def status():
             "timestamp": time.time()
         })
     except Exception as e:
-        logger.error(f"Status check failed: {e}")
+        logger.error(f"Status check failed: {e}")  # коротко, без traceback
         return jsonify({
             "bot_status": "error",
             "error": str(e),
@@ -528,7 +528,8 @@ if __name__ == "__main__":
                     time.sleep(5)
                     continue
                 else:
-                    raise api_error
+                    logger.error(f"Помилка Telegram API: {api_error}")
+                    time.sleep(10)
     except KeyboardInterrupt:
         logger.info("Бот зупинено користувачем")
         try:
