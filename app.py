@@ -1,3 +1,8 @@
+"""
+Kuznya Music Studio Telegram Bot - Enhanced Dialog & Admin System + реферальна програма
+Version: 3.1 | Render/In-Memory | Telebot
+"""
+
 import os
 import time
 import html
@@ -26,27 +31,28 @@ config = BotConfig()
 
 # === TEXTS ===
 class Messages:
-    WELCOME = """Привіт, <b>{}</b>! 👋
+    WELCOME = """Привіт, {}! 👋
 Ласкаво просимо до музичної студії Kuznya Music!
+
 Оберіть дію з меню:"""
-    EXAMPLES_INFO = """🎵 <b>Наші роботи:</b>\n\nПослухати приклади можна тут:\n<a href="{}">{}</a>"""
-    CHANNEL_INFO = """📢 <b>Підписуйтесь на наш канал:</b>\n<a href="{}">{}</a>"""
-    CONTACTS_INFO = """📲 <b>Контакти студії:</b>\nTelegram: <a href="https://t.me/kuznya_music">@kuznya_music</a>"""
-    ABOUT_INFO = """ℹ️ <b>Про студію</b>\n\nKuznya Music — сучасна музична студія для запису, зведення, майстерингу, аранжування та творчих експериментів."""
-    DIALOG_STARTED = "<b>✅ Діалог розпочато!</b> Пишіть повідомлення адміністратору."
-    DIALOG_ENDED_USER = "<b>✅ Діалог завершено.</b> Дякуємо за спілкування!"
-    DIALOG_ENDED_ADMIN = "<b>✅ Діалог завершено адміністратором.</b> Ви можете почати новий діалог!"
+    EXAMPLES_INFO = """🎵 *Наші роботи:*\n\nПослухати приклади можна тут:\n{}"""
+    CHANNEL_INFO = """📢 *Підписуйтесь на наш канал:*\n\n{}"""
+    CONTACTS_INFO = """📲 *Контакти студії:*\nTelegram: @kuznya_music"""
+    ABOUT_INFO = """ℹ️ *Про студію*\n\nKuznya Music - сучасна музична студія для запису, зведення, майстерингу, аранжування та творчих експериментів."""
+    DIALOG_STARTED = "✅ Діалог розпочато! Пишіть повідомлення адміністратору."
+    DIALOG_ENDED_USER = "✅ Діалог завершено. Дякуємо за спілкування!"
+    DIALOG_ENDED_ADMIN = "✅ Діалог завершено адміністратором. Ви можете почати новий діалог!"
     ADMIN_PANEL = "👨‍💼 <b>Адмін-панель</b>\n\nОберіть дію:"
-    ERROR_SEND_FAILED = "<b>❌ Помилка при відправці повідомлення.</b> Спробуйте пізніше."
-    USE_MENU_BUTTONS = "<b>🤔 Використовуйте кнопки меню для навігації</b>"
-    BROADCAST_PROMPT = "<b>📢 Введіть текст для розсилки всім користувачам або натисніть '❌ Скасувати'</b>"
-    BROADCAST_DONE = "<b>📊 Розсилка завершена!</b>"
-    BROADCAST_CANCELLED = "<b>❌ Розсилка скасована.</b>"
-    SHARE_BOT = """🎉 Запроси друга у музичний бот!\nПросто поділись цим посиланням:\n<a href="{}">{}</a>\n\nЗа кожного друга — бонус чи знижка! Якщо запросиш 3 друзів — отримаєш промокод на знижку 25% на запис!"""
-    BONUS_PROMO = "<b>🎁 Ваш промокод на знижку 25%:</b> <code>{}</code>\nПокажіть цей код адміністратору при записі!"
+    ERROR_SEND_FAILED = "❌ Помилка при відправці повідомлення. Спробуйте пізніше."
+    USE_MENU_BUTTONS = "🤔 Використовуйте кнопки меню для навігації"
+    BROADCAST_PROMPT = "📢 Введіть текст для розсилки всім користувачам або натисніть '❌ Скасувати'"
+    BROADCAST_DONE = "📊 Розсилка завершена!"
+    BROADCAST_CANCELLED = "❌ Розсилка скасована."
+    SHARE_BOT = "🎉 Запроси друга у музичний бот!\nПросто поділись цим посиланням:\n{}\n\nЗа кожного друга — бонус чи знижка!\nЯкщо запросиш 3 друзів — отримаєш промокод на знижку 25% на запис!"
+    BONUS_PROMO = "🎁 Ваш промокод на знижку 25%: {}\nПокажіть цей код адміністратору при записі!"
     NO_PROMO = "У вас ще немає промокоду. Запросіть 3 друзів та отримайте знижку!"
-    FRIEND_JOINED = "🎉 Ваш друг <b>{}</b> приєднався за вашим реферальним посиланням! Дякуємо!"
-    PROMO_ACHIEVED = "🎉 Вітаємо! Ви запросили 3 друзів і отримали промокод на знижку 25% — <code>{}</code>\nПокажіть цей код адміністратору при записі."
+    FRIEND_JOINED = "🎉 Ваш друг {} приєднався за вашим реферальним посиланням! Дякуємо!"
+    PROMO_ACHIEVED = "🎉 Вітаємо! Ви запросили 3 друзів і отримали промокод на знижку 25% — {}\nПокажіть цей код адміністратору при записі."
 
 # === ENHANCED DIALOG MANAGER + REFERRALS ===
 class EnhancedDialogManager:
@@ -222,24 +228,27 @@ def get_admin_main_keyboard(dm):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
         types.KeyboardButton(f"💬 Активні діалоги ({stats['active_dialogs']})"),
-        types.KeyboardButton("👥 Користувачі")
+        types.KeyboardButton("🆕 Новий діалог")
     )
-    markup.add(types.KeyboardButton("📊 Статистика"))
+    markup.add(
+        types.KeyboardButton(f"👥 Користувачі ({stats['total_users']})"),
+        types.KeyboardButton("📊 Статистика")
+    )
     markup.add(types.KeyboardButton("📢 Розсилка"))
     return markup
 
-def get_cancel_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-    markup.add(types.KeyboardButton("❌ Скасувати"))
-    return markup
-
-def get_admin_dialog_keyboard(user_id):
+def get_admin_dialog_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
         types.KeyboardButton("❌ Завершити діалог"),
         types.KeyboardButton("🔄 Інший діалог")
     )
     markup.add(types.KeyboardButton("🏠 Головне меню"))
+    return markup
+
+def get_cancel_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(types.KeyboardButton("❌ Скасувати"))
     return markup
 
 # === LOGGING ===
@@ -250,7 +259,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-bot = telebot.TeleBot(config.TOKEN, parse_mode="HTML")
+bot = telebot.TeleBot(config.TOKEN)
 
 def is_admin(user_id): return user_id == config.ADMIN_ID
 
@@ -263,55 +272,15 @@ def get_user_info(user):
         'full_name': f"{user.first_name or ''} {user.last_name or ''}".strip()
     }
 
-def sanitize_input(text): return html.escape(str(text).strip())
+def sanitize_input(text): return html.escape(text.strip())
 
-# === USER HANDLERS ===
-
-@bot.message_handler(func=lambda m: m.text == "💬 Почати діалог")
-def handle_dialog_start(message):
-    user_id = message.from_user.id
-    if dialog_manager.is_user_in_dialog(user_id):
-        bot.send_message(user_id, "Ви вже у діалозі!", reply_markup=get_dialog_keyboard())
-        return
-    dialog_manager.start_dialog(user_id, config.ADMIN_ID)
-    bot.send_message(user_id, Messages.DIALOG_STARTED, reply_markup=get_dialog_keyboard())
-    bot.send_message(config.ADMIN_ID, f"🔔 Новий діалог з користувачем <b>{sanitize_input(message.from_user.full_name)}</b> (id: {user_id})", reply_markup=get_admin_dialog_keyboard(user_id))
-
-@bot.message_handler(func=lambda m: m.text == "🎧 Наші роботи")
-def handle_examples(message):
-    url = html.escape(config.EXAMPLES_URL)
-    bot.send_message(message.from_user.id, Messages.EXAMPLES_INFO.format(url, url), parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: m.text == "📢 Підписатися")
-def handle_channel(message):
-    url = html.escape(config.CHANNEL_URL)
-    bot.send_message(message.from_user.id, Messages.CHANNEL_INFO.format(url, url), parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: m.text == "📲 Контакти")
-def handle_contacts(message):
-    bot.send_message(message.from_user.id, Messages.CONTACTS_INFO, parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: m.text == "ℹ️ Про студію")
-def handle_about(message):
-    bot.send_message(message.from_user.id, Messages.ABOUT_INFO, parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: m.text == "❌ Завершити діалог")
-def handle_dialog_end(message):
-    user_id = message.from_user.id
-    if dialog_manager.is_user_in_dialog(user_id):
-        dialog_manager.end_dialog(user_id)
-        bot.send_message(user_id, Messages.DIALOG_ENDED_USER, reply_markup=get_main_keyboard())
-        bot.send_message(config.ADMIN_ID, f"❌ Діалог з {user_id} завершено.", reply_markup=get_admin_main_keyboard(dialog_manager))
-    else:
-        bot.send_message(user_id, "У вас немає активного діалогу.", reply_markup=get_main_keyboard())
+# === REFERRAL HANDLERS ===
 
 @bot.message_handler(func=lambda m: m.text == "🔗 Поділитись ботом")
 def handle_share_bot(message):
     user_id = message.from_user.id
-    bot_username = bot.get_me().username
-    referral_link = f"https://t.me/{bot_username}?start=ref{user_id}"
-    safe_link = html.escape(referral_link)
-    text = Messages.SHARE_BOT.format(safe_link, safe_link)
+    referral_link = f"https://t.me/{bot.get_me().username}?start=ref{user_id}"
+    text = Messages.SHARE_BOT.format(referral_link)
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("Поділитись ботом", url=referral_link))
     bot.send_message(
@@ -327,98 +296,36 @@ def handle_promocode(message):
     if code:
         bot.send_message(
             user_id,
-            Messages.BONUS_PROMO.format(html.escape(code)),
-            parse_mode="HTML"
+            Messages.BONUS_PROMO.format(code)
         )
     else:
         bot.send_message(
             user_id,
-            Messages.NO_PROMO,
-            parse_mode="HTML"
+            Messages.NO_PROMO
         )
-
-# === ADMIN HANDLERS ===
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "🏠 Головне меню")
-def handle_admin_home(message):
-    stats = dialog_manager.get_statistics()
-    bot.send_message(
-        config.ADMIN_ID,
-        f"{Messages.ADMIN_PANEL}\n\nАктивних діалогів: {stats['active_dialogs']}\nКористувачів: {stats['total_users']}\nПовідомлень: {stats['total_messages']}",
-        reply_markup=get_admin_main_keyboard(dialog_manager),
-        parse_mode="HTML"
-    )
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text.startswith("💬 Активні діалоги"))
-def admin_active_dialogs(message):
-    dialogs = dialog_manager.get_active_dialogs()
-    if not dialogs:
-        bot.send_message(config.ADMIN_ID, "Немає активних діалогів.", reply_markup=get_admin_main_keyboard(dialog_manager))
-        return
-    msg = "<b>Активні діалоги:</b>\n"
-    for d in dialogs:
-        msg += f"- {sanitize_input(d['full_name'])} (id: {d['user_id']})\n"
-    bot.send_message(config.ADMIN_ID, msg, reply_markup=get_admin_main_keyboard(dialog_manager), parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
-def admin_users(message):
-    users = dialog_manager.get_all_users()
-    msg = "<b>Користувачі бота:</b>\n"
-    for u in users:
-        msg += f"- {sanitize_input(u[2])} (id: {u[0]})\n"
-    bot.send_message(config.ADMIN_ID, msg, reply_markup=get_admin_main_keyboard(dialog_manager), parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
-def admin_stats(message):
-    stats = dialog_manager.get_statistics()
-    msg = f"<b>Статистика бота:</b>\nКористувачів: {stats['total_users']}\nДіалогів: {stats['total_dialogs']}\nПовідомлень: {stats['total_messages']}\nАптайм: {stats['uptime_seconds']//3600} год"
-    bot.send_message(config.ADMIN_ID, msg, reply_markup=get_admin_main_keyboard(dialog_manager), parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
-def admin_broadcast(message):
-    dialog_manager.admin_broadcast_mode = True
-    bot.send_message(config.ADMIN_ID, Messages.BROADCAST_PROMPT, reply_markup=get_cancel_keyboard(), parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and dialog_manager.admin_broadcast_mode and m.text == "❌ Скасувати")
-def admin_broadcast_cancel(message):
-    dialog_manager.admin_broadcast_mode = False
-    bot.send_message(config.ADMIN_ID, Messages.BROADCAST_CANCELLED, reply_markup=get_admin_main_keyboard(dialog_manager))
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and dialog_manager.admin_broadcast_mode)
-def admin_broadcast_send(message):
-    text = sanitize_input(message.text)
-    for user_id in dialog_manager.users:
-        if user_id != config.ADMIN_ID:
-            try:
-                bot.send_message(user_id, f"📢 <b>Оголошення від студії Kuznya Music:</b>\n\n{text}", parse_mode="HTML")
-            except Exception: pass
-    dialog_manager.admin_broadcast_mode = False
-    bot.send_message(config.ADMIN_ID, Messages.BROADCAST_DONE, reply_markup=get_admin_main_keyboard(dialog_manager))
 
 # === START HANDLER (з рефералами) ===
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     user_info = get_user_info(message.from_user)
     args = message.text.split(' ', 1)
+    # Referral logic
     if len(args) > 1 and args[1].startswith('ref'):
         referrer_id = int(args[1][3:])
         if referrer_id != user_info['id']:
             dialog_manager.save_user(user_info['id'], user_info['username'], user_info['full_name'])
             promo = dialog_manager.add_referral(referrer_id, user_info['id'])
-            user_name = html.escape(user_info['full_name'])
             if promo:
                 bot.send_message(
                     referrer_id,
-                    Messages.PROMO_ACHIEVED.format(html.escape(promo)),
-                    parse_mode="HTML"
+                    Messages.PROMO_ACHIEVED.format(promo)
                 )
             bot.send_message(
                 referrer_id,
-                Messages.FRIEND_JOINED.format(user_name),
-                parse_mode="HTML"
+                Messages.FRIEND_JOINED.format(user_info['full_name'])
             )
+    # Далі стандартна логіка старту
     dialog_manager.save_user(user_info['id'], user_info['username'], user_info['full_name'])
-    user_first_name_html = html.escape(user_info['first_name'])
     if is_admin(user_info['id']):
         markup = get_admin_main_keyboard(dialog_manager)
         stats = dialog_manager.get_statistics()
@@ -440,61 +347,9 @@ def handle_start(message):
             markup = get_main_keyboard()
             bot.send_message(
                 user_info['id'],
-                Messages.WELCOME.format(user_first_name_html),
-                reply_markup=markup,
-                parse_mode="HTML"
+                Messages.WELCOME.format(user_info['first_name']),
+                reply_markup=markup
             )
-
-# === ROUTING ДІАЛОГУ ===
-@bot.message_handler(func=lambda m: dialog_manager.is_user_in_dialog(m.from_user.id) and not is_admin(m.from_user.id))
-def user_dialog_message(message):
-    user_id = message.from_user.id
-    dialog_manager.save_message(user_id, message.text, is_admin=False)
-    try:
-        bot.send_message(config.ADMIN_ID, f"👤 <b>Користувач {sanitize_input(message.from_user.full_name)}:</b>\n{sanitize_input(message.text)}", reply_markup=get_admin_dialog_keyboard(user_id), parse_mode="HTML")
-        bot.send_message(user_id, "✅ Повідомлення надіслано адміністратору.")
-    except Exception:
-        bot.send_message(user_id, Messages.ERROR_SEND_FAILED)
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and dialog_manager.get_admin_current_dialog(config.ADMIN_ID))
-def admin_dialog_message(message):
-    user_id = dialog_manager.get_admin_current_dialog(config.ADMIN_ID)
-    dialog_manager.save_message(user_id, message.text, is_admin=True)
-    try:
-        bot.send_message(user_id, f"👨‍💼 <b>Адміністратор:</b>\n{sanitize_input(message.text)}")
-        bot.send_message(config.ADMIN_ID, "✅ Надіслано користувачу.", reply_markup=get_admin_dialog_keyboard(user_id))
-    except Exception:
-        bot.send_message(config.ADMIN_ID, Messages.ERROR_SEND_FAILED)
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text and m.text.startswith("🔄 Інший діалог"))
-def admin_switch_dialog(message):
-    dialogs = dialog_manager.get_active_dialogs()
-    for d in dialogs:
-        if d['user_id'] != dialog_manager.get_admin_current_dialog(config.ADMIN_ID):
-            dialog_manager.set_admin_current_dialog(config.ADMIN_ID, d['user_id'])
-            bot.send_message(config.ADMIN_ID, f"🔄 Переключено на діалог з {sanitize_input(d['full_name'])}.", reply_markup=get_admin_dialog_keyboard(d['user_id']))
-            return
-    bot.send_message(config.ADMIN_ID, "Немає інших активних діалогів.", reply_markup=get_admin_main_keyboard(dialog_manager))
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text and m.text == "❌ Завершити діалог")
-def admin_end_dialog(message):
-    user_id = dialog_manager.get_admin_current_dialog(config.ADMIN_ID)
-    if user_id:
-        dialog_manager.end_dialog(user_id)
-        bot.send_message(config.ADMIN_ID, "✅ Діалог завершено.", reply_markup=get_admin_main_keyboard(dialog_manager))
-        bot.send_message(user_id, Messages.DIALOG_ENDED_ADMIN, reply_markup=get_main_keyboard())
-    else:
-        bot.send_message(config.ADMIN_ID, "Немає вибраного діалогу.", reply_markup=get_admin_main_keyboard(dialog_manager))
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text and m.text == "🆕 Новий діалог")
-def admin_new_dialog(message):
-    dialogs = dialog_manager.get_active_dialogs()
-    if dialogs:
-        user_id = dialogs[0]['user_id']
-        dialog_manager.set_admin_current_dialog(config.ADMIN_ID, user_id)
-        bot.send_message(config.ADMIN_ID, f"Вибрано діалог з {sanitize_input(dialogs[0]['full_name'])}.", reply_markup=get_admin_dialog_keyboard(user_id))
-    else:
-        bot.send_message(config.ADMIN_ID, "Немає активних діалогів.", reply_markup=get_admin_main_keyboard(dialog_manager))
 
 # === HEALTHCHECK with Flask ===
 health_app = Flask(__name__)
