@@ -605,6 +605,12 @@ def handle_user_dialog_message(message):
         bot.send_message(admin_id, admin_text, parse_mode="HTML")
     except Exception as e:
         logger.warning(f"ADMIN dialog send error: {e}")
+    # Додаємо підтвердження для юзера:
+    bot.send_message(
+        user.id,
+        "✅ Повідомлення відправлено!",
+        reply_to_message_id=message.message_id
+    )
 
 @bot.message_handler(func=lambda m: m.from_user.id == config.ADMIN_ID and admin_state.get("state") == ADMIN_DIALOG and m.text not in [
     "❌ Завершити діалог", "🔄 Перейти до іншого діалогу", "🏠 Головне меню"])
@@ -623,6 +629,12 @@ def handle_admin_dialog_message(message):
         bot.send_message(user_id, user_text, parse_mode="HTML")
     except Exception as e:
         bot.send_message(config.ADMIN_ID, f"❌ Не вдалося надіслати користувачу: {e}")
+    # Додаємо підтвердження для адміна:
+    bot.send_message(
+        config.ADMIN_ID,
+        "✅ Повідомлення відправлено!",
+        reply_to_message_id=message.message_id
+    )
 
 # --- UNKNOWN HANDLER ---
 @bot.message_handler(func=lambda m: True)
