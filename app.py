@@ -329,6 +329,9 @@ def handle_contacts(message):
 @bot.message_handler(func=lambda m: m.text == "🎤 Записати трек")
 @safe_handler
 def handle_record(message):
+    # Захист від дубляжу: якщо вже чекаємо повідомлення, не надсилаємо повторно prompt
+    if get_user_state(message.from_user.id) == UserStates.WAITING_FOR_MESSAGE:
+        return
     set_user_state(message.from_user.id, UserStates.WAITING_FOR_MESSAGE)
     safe_send(message.chat.id, Messages.RECORDING_PROMPT, parse_mode="HTML")
 
