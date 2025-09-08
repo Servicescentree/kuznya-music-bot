@@ -2,3 +2,4 @@ pyTelegramBotAPI
 redis
 flask
 requests
+python-dotenv
