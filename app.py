@@ -14,7 +14,7 @@ import redis
 
 # -------- REDIS SETUP --------
 REDIS_URL = os.getenv("UPSTASH_REDIS_REST_URL")
-if not REDIS_URL or not REDREDIS_URL.startswith("redis"):
+if not REDIS_URL or not REDIS_URL.startswith("redis"):
     raise ValueError(f"UPSTASH_REDIS_REST_URL is not set or invalid! Got: {REDIS_URL}")
 r = redis.from_url(REDIS_URL, decode_responses=True)
 
