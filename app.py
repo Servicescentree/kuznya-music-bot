@@ -14,7 +14,7 @@ import redis
 
 # -------- REDIS SETUP --------
 REDIS_URL = os.getenv("UPSTASH_REDIS_REST_URL")
-if not REDIS_URL or not REDIS_URL.startswith("redis"):
+if not REDIS_URL or not REDREDIS_URL.startswith("redis"):
     raise ValueError(f"UPSTASH_REDIS_REST_URL is not set or invalid! Got: {REDIS_URL}")
 r = redis.from_url(REDIS_URL, decode_responses=True)
 
@@ -266,7 +266,7 @@ def format_admin_request(user, user_id, message_text, dt):
     name = f"{user.first_name or ''} {user.last_name or ''}".strip()
     profile_link = f'<a href="tg://user?id={user_id}">{html.escape(name)}</a>'
     username_link = f" (<a href=\"https://t.me/{user.username}\">{tg_username}</a>)" if user.username else ""
-    time_str = dt.strftime("%H:%M %d.%m.%Y")
+    time_str = time.strftime("%H:%M %d.%m.%Y", dt)
     return (
         "💬 <b>Нове повідомлення від клієнта</b>\n\n"
         f"👤 <b>Клієнт:</b> {profile_link}{username_link}\n"
@@ -276,7 +276,7 @@ def format_admin_request(user, user_id, message_text, dt):
         f"{html.escape(message_text)}"
     )
 
-# -------- HANDLЕРИ --------
+# -------- HANDLERS --------
 
 @bot.message_handler(commands=["start"])
 @safe_handler
@@ -342,8 +342,8 @@ def handle_user_request(message):
     incr_stat("user_requests")
     user = message.from_user
     user_id = user.id
-    dt = time.localtime()
-    msg = format_admin_request(user, user_id, message.text, time.localtime())
+    dt = time.localtime(message.date)
+    msg = format_admin_request(user, user_id, message.text, dt)
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("✍️ Відповісти", callback_data=f"admin_reply_{user_id}"))
     safe_send(config.ADMIN_ID, msg, parse_mode="HTML", reply_markup=markup)
