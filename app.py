@@ -98,7 +98,7 @@ admin_replies = {}     # admin_id: target_user_id
 
 # -------- UTILS --------
 def is_admin(user_id: int) -> bool:
-    return user_id == config.ADMIN_ID
+    return int(user_id) == int(config.ADMIN_ID)
 
 def get_user_info(user) -> Dict[str, Any]:
     return {
@@ -184,7 +184,7 @@ def handle_start(message):
             reply_markup=markup
         )
 
-@bot.message_handler(func=lambda message: message.text == "🎤 Записати трек")
+@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "🎤 Записати трек")
 def handle_start_recording(message):
     user_id = message.from_user.id
     user_states[user_id] = UserStates.WAITING_FOR_MESSAGE
@@ -196,7 +196,7 @@ def handle_start_recording(message):
         reply_markup=markup
     )
 
-@bot.message_handler(func=lambda message: message.text == "🎧 Приклади робіт")
+@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "🎧 Приклади робіт")
 def handle_show_examples(message):
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton(
@@ -209,7 +209,7 @@ def handle_show_examples(message):
         reply_markup=markup
     )
 
-@bot.message_handler(func=lambda message: message.text == "📢 Підписатися")
+@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "📢 Підписатися")
 def handle_show_channel(message):
     bot.send_message(
         message.chat.id,
@@ -217,14 +217,14 @@ def handle_show_channel(message):
         disable_web_page_preview=False
     )
 
-@bot.message_handler(func=lambda message: message.text == "📲 Контакти")
+@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "📲 Контакти")
 def handle_show_contacts(message):
     bot.send_message(
         message.chat.id,
         Messages.CONTACTS_INFO
     )
 
-@bot.message_handler(func=lambda message: message.text == "❌ Завершити діалог")
+@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "❌ Завершити діалог")
 def handle_end_dialog(message):
     user_id = message.from_user.id
     if user_id in user_states:
@@ -268,6 +268,8 @@ def handle_user_message(message):
     bot.forward_message(config.ADMIN_ID, message.chat.id, message.message_id)
     # Підтвердження юзеру
     bot.send_message(message.chat.id, Messages.MESSAGE_SENT)
+
+# ---- АДМІН ПАНЕЛЬ І ВІДПОВІДІ ----
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('reply_'))
 def handle_admin_reply_callback(call):
@@ -326,10 +328,7 @@ def handle_admin_reply_or_panel(message):
         admin_replies.pop(admin_id, None)
         return
 
-    # 3. Якщо просто пише щось інше — показуємо меню адміна
-    if message.text and message.text.startswith("/"):
-        return
-
+    # 3. Якщо інше — показуємо адмінське меню
     markup = get_admin_keyboard()
     bot.send_message(
         admin_id,
