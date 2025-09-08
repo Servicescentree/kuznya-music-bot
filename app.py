@@ -28,6 +28,8 @@ class BotConfig:
     MAX_MESSAGE_LENGTH: int = 4000
     RATE_LIMIT_MESSAGES: int = 5
 
+config = BotConfig()
+
 # === TEXTS ===
 class Messages:
     WELCOME = """Привіт, {}! 👋
@@ -198,6 +200,8 @@ class EnhancedDialogManager:
     def get_promo_code(self, user_id):
         return self.promo_codes.get(user_id)
 
+dialog_manager = EnhancedDialogManager()
+
 # === KEYBOARDS ===
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
@@ -211,7 +215,7 @@ def get_main_keyboard():
     )
     markup.add(
         types.KeyboardButton("ℹ️ Про студію"),
-        types.KeyboardButton("🔗 Поділитись ботом")  # Новинка!
+        types.KeyboardButton("🔗 Поділитись ботом")
     )
     return markup
 
@@ -255,9 +259,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
-
-config = BotConfig()
-dialog_manager = EnhancedDialogManager()
 
 bot = telebot.TeleBot(config.TOKEN)
 
@@ -351,33 +352,29 @@ def handle_start(message):
                 reply_markup=markup
             )
 
-# === Далі залишаєш всю логіку бота як у твоєму робочому файлі ===
-# ... (handlers діалогів, адмінки, broadcast, health endpoints тощо)
+# === HEALTHCHECK with Flask ===
+health_app = Flask(__name__)
+
+@health_app.route("/ping")
+def ping():
+    return jsonify({"status": "ok", "time": int(time.time())})
+
+def run_health_server():
+    health_app.run(host='0.0.0.0', port=config.WEBHOOK_PORT, debug=False, threaded=True)
+
+# === AUTOPING (KEEPALIVE) ===
+def background_ping_bot():
+    while True:
+        try:
+            bot.get_me()
+            logging.info("Bot keepalive ping sent to Telegram")
+        except Exception as e:
+            logging.error(f"Ping error: {e}")
+        time.sleep(300)  # кожні 5 хвилин
 
 # === MAIN EXECUTION ===
 if __name__ == "__main__":
-    try:
-        logger.info("Starting Kuznya Music Studio Bot...")
-        flask_thread = Thread(target=lambda: Flask(__name__).run(
-            host='0.0.0.0',
-            port=config.WEBHOOK_PORT,
-            debug=False,
-            threaded=True
-        ), daemon=True)
-        flask_thread.start()
-        logger.info(f"Flask server started on port {config.WEBHOOK_PORT}")
-        time.sleep(2)
-        bot.polling(none_stop=True, interval=1, timeout=30)
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-        try:
-            bot.stop_polling()
-        except:
-            pass
-    except Exception as e:
-        logger.critical(f"Critical error: {e}")
-        try:
-            bot.stop_polling()
-        except:
-            pass
-        exit(1)
+    Thread(target=run_health_server, daemon=True).start()
+    Thread(target=background_ping_bot, daemon=True).start()
+    time.sleep(2)
+    bot.polling(none_stop=True, interval=2, timeout=30)
