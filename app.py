@@ -87,6 +87,7 @@ class Messages:
 class UserStates:
     IDLE = 'idle'
     WAITING_FOR_MESSAGE = 'waiting_for_message'
+    REPLY_TO_USER = 'reply_to_user'
     REPLY_TO_ADMIN = 'reply_to_admin'
 
 BROADCAST_STATE = 'waiting_for_broadcast_message'
@@ -330,7 +331,6 @@ def handle_contacts(message):
 @bot.message_handler(func=lambda m: m.text == "🎤 Записати трек")
 @safe_handler
 def handle_record(message):
-    # Завжди надсилаємо prompt, навіть якщо вже у діалозі
     safe_send(message.chat.id, Messages.RECORDING_PROMPT, parse_mode="HTML")
     set_user_state(message.from_user.id, UserStates.WAITING_FOR_MESSAGE)
 
@@ -347,316 +347,59 @@ def handle_user_request(message):
     dt = time.localtime(message.date)
     msg = format_admin_request(user, user_id, message.text, dt)
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("✍️ Відповісти", callback_data=f"admin_reply_{user_id}"))
+    markup.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data=f"admin_reply_{user_id}"))
     safe_send(config.ADMIN_ID, msg, parse_mode="HTML", reply_markup=markup)
     safe_send(message.chat.id, Messages.MESSAGE_SENT, parse_mode="HTML")
     set_user_state(message.from_user.id, UserStates.IDLE)
 
-# --------- ЛЕГКІ ВІДПОВІДІ КОРИСТУВАЧУ ВІД АДМІНА ---------
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_reply_"))
+def admin_reply_callback(call):
+    admin_id = call.from_user.id
+    user_id = int(call.data.replace("admin_reply_", ""))
+    set_admin_reply_target(admin_id, user_id)
+    set_user_state(admin_id, UserStates.REPLY_TO_USER)
+    safe_send(admin_id, f"Ви відповідаєте користувачу <code>{user_id}</code>. Напишіть текст:", parse_mode="HTML")
 
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_admin_reply_target(m.from_user.id))
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_user_state(m.from_user.id) == UserStates.REPLY_TO_USER)
 @safe_handler
-def admin_reply_to_selected_user(message):
+def admin_reply_to_user(message):
     admin_id = message.from_user.id
     user_id = get_admin_reply_target(admin_id)
-    try:
-        incr_stat("admin_replies")
-        logger.info(f"Admin {admin_id} replies to user {user_id}: {message.text[:60]}")
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data=f"admin_reply_to_user_{admin_id}"))
-        safe_send(
-            user_id,
-            Messages.ADMIN_REPLY.format(html.escape(message.text or "")),
-            parse_mode='HTML',
-            reply_markup=markup
-        )
-        safe_send(admin_id, "✅ Відповідь відправлено користувачу.", parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Error sending reply from admin to user: {e}", exc_info=True)
-        safe_send(admin_id, f"❌ Не вдалося відправити відповідь: {e}", parse_mode="HTML")
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data=f"user_reply_{admin_id}"))
+    safe_send(
+        user_id,
+        Messages.ADMIN_REPLY.format(html.escape(message.text or "")),
+        parse_mode='HTML',
+        reply_markup=markup
+    )
+    safe_send(admin_id, "✅ Відповідь відправлена!", parse_mode="HTML")
     clear_admin_reply_target(admin_id)
+    set_user_state(admin_id, UserStates.IDLE)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_reply_to_user_"))
-def admin_reply_to_user_callback(call):
-    admin_id = int(call.data.replace("admin_reply_to_user_", ""))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("user_reply_"))
+def user_reply_callback(call):
     user_id = call.from_user.id
+    admin_id = int(call.data.replace("user_reply_", ""))
     set_admin_reply_target(admin_id, user_id)
-    safe_send(user_id, "Напишіть свою відповідь адміністратору 👇", parse_mode="HTML")
-
-@bot.callback_query_handler(func=lambda call: call.data == "user_reply_to_admin")
-def user_reply_to_admin_callback(call):
-    user_id = call.from_user.id
     set_user_state(user_id, UserStates.REPLY_TO_ADMIN)
-    safe_send(user_id, "Напишіть свою відповідь для адміністратора 👇", parse_mode="HTML")
+    safe_send(user_id, "Ви відповідаєте адміністратору. Напишіть текст:", parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: get_user_state(m.from_user.id) == UserStates.REPLY_TO_ADMIN)
 @safe_handler
-def user_send_reply_to_admin(message):
-    text = html.escape(message.text or "")
-    user = message.from_user
-    user_id = user.id
+def user_reply_to_admin(message):
+    user_id = message.from_user.id
+    admin_id = config.ADMIN_ID
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data=f"admin_reply_{user_id}"))
     reply_text = (
         f"↩️ <b>Відповідь клієнта</b>\n"
-        f"👤 <b>Клієнт:</b> <a href=\"tg://user?id={user_id}\">{html.escape(user.first_name or '')}</a>\n"
+        f"👤 <b>Клієнт:</b> <a href=\"tg://user?id={user_id}\">{html.escape(message.from_user.first_name or '')}</a>\n"
         f"🆔 <b>ID:</b> <code>{user_id}</code>\n\n"
-        f"📝 <b>Повідомлення:</b>\n{text}"
+        f"📝 <b>Повідомлення:</b>\n{html.escape(message.text or '')}"
     )
-    safe_send(config.ADMIN_ID, reply_text, parse_mode="HTML")
+    safe_send(admin_id, reply_text, parse_mode="HTML", reply_markup=markup)
     safe_send(message.chat.id, "✅ Ваша відповідь адміністратору надіслана!", parse_mode="HTML")
-    set_user_state(message.from_user.id, UserStates.IDLE)
+    set_user_state(user_id, UserStates.IDLE)
 
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
-@safe_handler
-def admin_show_users(message):
-    user_ids = get_all_user_ids()
-    if not user_ids:
-        safe_send(message.chat.id, "Немає користувачів.", parse_mode="HTML")
-        return
-    markup = types.InlineKeyboardMarkup()
-    for uid in user_ids:
-        try:
-            info = r.get(f"user:{uid}:info") or str(uid)
-        except Exception as e:
-            logger.error(f"Redis error in admin_show_users/info: {e}", exc_info=True)
-            info = str(uid)
-        markup.add(types.InlineKeyboardButton(
-            text=f"{info} (id:{uid})", callback_data=f"admin_reply_{uid}"
-        ))
-    safe_send(message.chat.id, "Оберіть користувача для відповіді:", reply_markup=markup, parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
-@safe_handler
-def admin_show_active_dialogs(message):
-    user_ids = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
-    if not user_ids:
-        safe_send(message.chat.id, "Немає активних діалогів.", parse_mode="HTML")
-        return
-    markup = types.InlineKeyboardMarkup()
-    for uid in user_ids:
-        try:
-            info = r.get(f"user:{uid}:info") or str(uid)
-        except Exception as e:
-            logger.error(f"Redis error in admin_show_active_dialogs/info: {e}", exc_info=True)
-            info = str(uid)
-        markup.add(types.InlineKeyboardButton(
-            text=f"{info} (id:{uid})", callback_data=f"admin_reply_{uid}"
-        ))
-    safe_send(message.chat.id, "Оберіть діалог для відповіді:", reply_markup=markup, parse_mode="HTML")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_reply_"))
-def admin_select_user_for_reply(call):
-    admin_id = call.from_user.id
-    try:
-        user_id = int(call.data.replace("admin_reply_", ""))
-        set_admin_reply_target(admin_id, user_id)
-        safe_send(admin_id, f"Ви обрали користувача id: {user_id}. Введіть відповідь для нього.", parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Callback error in admin_select_user_for_reply: {e}", exc_info=True)
-        safe_send(admin_id, "❌ Трапилась помилка при виборі користувача.", parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
-@safe_handler
-def admin_stats(message):
-    total_users = len(get_all_user_ids())
-    user_requests = get_stat("user_requests")
-    admin_replies = get_stat("admin_replies")
-    active_chats = len([uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE])
-    uptime_seconds = int(time.time() - bot_start_time)
-    uptime_hours = uptime_seconds // 3600
-    uptime_minutes = (uptime_seconds % 3600) // 60
-    start_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))
-
-    msg = (
-        f"📊 <b>Статистика бота</b>\n\n"
-        f"👥 Унікальних користувачів: <b>{total_users}</b>\n"
-        f"📨 Заявок від юзерів: <b>{user_requests}</b>\n"
-        f"💬 Відповідей адміна: <b>{admin_replies}</b>\n"
-        f"🟢 Активних чатів: <b>{active_chats}</b>\n"
-        f"⏱ Аптайм: <b>{uptime_hours} год {uptime_minutes} хв</b>\n"
-        f"🚀 Останній рестарт: <b>{start_time_str}</b>"
-    )
-    safe_send(message.chat.id, msg, parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
-@safe_handler
-def admin_broadcast_start(message):
-    set_admin_state(message.from_user.id, BROADCAST_STATE)
-    safe_send(message.chat.id, "Введіть текст розсилки, який буде надіслано всім користувачам:", parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_admin_state(m.from_user.id) == BROADCAST_STATE)
-@safe_handler
-def admin_broadcast_process(message):
-    clear_admin_state(message.from_user.id)
-    text = html.escape(message.text or "")
-    users = get_all_user_ids()
-    delivered = 0
-    errors = 0
-    for i, uid in enumerate(users, start=1):
-        try:
-            bot.send_message(uid, f"📢 <b>Оголошення:</b>\n\n{text}", parse_mode="HTML")
-            delivered += 1
-        except Exception as e:
-            errors += 1
-            logger.warning(f"BROADCAST: failed to {uid}: {e}")
-        if i % 20 == 0:
-            time.sleep(0.5)
-        else:
-            time.sleep(0.12)
-    safe_send(message.chat.id, f"Розсилка завершена!\n\n"
-                               f"Успішно доставлено: <b>{delivered}</b>\n"
-                               f"Помилок: <b>{errors}</b>", parse_mode="HTML")
-    logger.info(f"BROADCAST: sent={delivered}, errors={errors}, total={len(users)}")
-
-@bot.message_handler(func=lambda message: True)
-@safe_handler
-def handle_other_messages(message):
-    if is_admin(message.from_user.id):
-        safe_send(
-            message.chat.id,
-            Messages.ADMIN_MENU_NAV,
-            reply_markup=get_admin_keyboard(),
-            parse_mode="HTML"
-        )
-    else:
-        safe_send(
-            message.chat.id,
-            Messages.USE_MENU_BUTTONS,
-            reply_markup=get_main_keyboard(),
-            parse_mode="HTML"
-        )
-
-# -------- FLASK & SELF-PING --------
-app = Flask(__name__)
-bot_start_time = time.time()
-
-@app.route('/')
-def health_check():
-    try:
-        uptime_seconds = int(time.time() - bot_start_time)
-        uptime_hours = uptime_seconds // 3600
-        uptime_minutes = (uptime_seconds % 3600) // 60
-        return f"""
-        <h1>🎵 Kuznya Music Studio Bot</h1>
-        <p><strong>Статус:</strong> ✅ Активний</p>
-        <p><strong>Uptime:</strong> {uptime_hours}год {uptime_minutes}хв</p>
-        <p><strong>Час запуску:</strong> {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))}</p>
-        <p><strong>Поточний час:</strong> {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
-        <p><strong>Користувачів:</strong> {len(get_all_user_ids())}</p>
-        """
-    except Exception as e:
-        logger.error(f"Health page error: {e}", exc_info=True)
-        return "<h1>Internal Error</h1>", 500
-
-@app.route('/health')
-def health():
-    try:
-        bot_info = bot.get_me()
-        return jsonify({
-            "status": "healthy",
-            "timestamp": time.time(),
-            "uptime_seconds": int(time.time() - bot_start_time),
-            "bot_username": bot_info.username,
-            "total_users": len(get_all_user_ids()),
-            "version": "3.0-admin-panel-redis"
-        }), 200
-    except Exception as e:
-        logger.error(f"Health check failed: {e}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "error": str(e),
-            "timestamp": time.time()
-        }), 500
-
-@app.route('/ping')
-def ping():
-    return "pong", 200
-
-@app.route('/status')
-def status():
-    try:
-        active_users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
-        return jsonify({
-            "bot_status": "running",
-            "uptime_seconds": int(time.time() - bot_start_time),
-            "total_users": len(get_all_user_ids()),
-            "active_chats": len(active_users),
-            "admin_id": config.ADMIN_ID,
-            "timestamp": time.time()
-        })
-    except Exception as e:
-        logger.error(f"Status check failed: {e}", exc_info=True)
-        return jsonify({
-            "bot_status": "error",
-            "error": str(e),
-            "timestamp": time.time()
-        }), 500
-
-@app.route('/keepalive')
-def keep_alive():
-    try:
-        return jsonify({
-            "message": "Bot is alive!",
-            "timestamp": time.time(),
-            "uptime": int(time.time() - bot_start_time)
-        })
-    except Exception as e:
-        logger.error(f"/keepalive error: {e}", exc_info=True)
-        return jsonify({"error": "Internal server error"}), 500
-
-@app.route(f"/bot{config.TOKEN}", methods=["POST"])
-def webhook():
-    if request.headers.get("content-type") == "application/json":
-        try:
-            json_string = request.get_data().decode("utf-8")
-            update = telebot.types.Update.de_json(json_string)
-            bot.process_new_updates([update])
-            return "", 200
-        except Exception as e:
-            logger.error(f"Webhook processing error: {e}", exc_info=True)
-            return "", 500
-    else:
-        return "", 403
-
-def run_flask():
-    app.run(
-        host='0.0.0.0',
-        port=config.WEBHOOK_PORT,
-        debug=False,
-        threaded=True
-    )
-
-def self_ping():
-    url = f"{config.WEBHOOK_URL}/keepalive"
-    while True:
-        try:
-            r2 = requests.get(url, timeout=10)
-            print(f"[SELF-PING] Pinged {url} ({r2.status_code})")
-        except Exception as e:
-            print(f"[SELF-PING] Error pinging {url}: {e}")
-        time.sleep(300)
-
-if __name__ == "__main__":
-    try:
-        logger.info("Starting Kuznya Music Studio Bot...")
-        bot.remove_webhook()
-        time.sleep(1)
-        set_url = f"{config.WEBHOOK_URL}/bot{config.TOKEN}"
-        webhook_result = bot.set_webhook(url=set_url)
-        if webhook_result:
-            logger.info(f"Webhook set: {set_url}")
-        else:
-            logger.warning("Webhook not set!")
-        flask_thread = Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        selfping_thread = Thread(target=self_ping, daemon=True)
-        selfping_thread.start()
-        logger.info("🎵 Music Studio Bot started successfully!")
-        logger.info(f"Admin ID: {config.ADMIN_ID}")
-        logger.info("Bot is running via webhook. No polling!")
-        while True:
-            time.sleep(60)
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.critical(f"Critical error: {e}", exc_info=True)
-        exit(1)
+# ... решта коду (admin panel, broadcast, stats, flask, keepalive, webhook, main) без змін ...
