@@ -352,6 +352,37 @@ def handle_user_request(message):
     safe_send(message.chat.id, Messages.MESSAGE_SENT, parse_mode="HTML")
     set_user_state(message.from_user.id, UserStates.IDLE)
 
+# --------- ЛЕГКІ ВІДПОВІДІ КОРИСТУВАЧУ ВІД АДМІНА ---------
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_admin_reply_target(m.from_user.id))
+@safe_handler
+def admin_reply_to_selected_user(message):
+    admin_id = message.from_user.id
+    user_id = get_admin_reply_target(admin_id)
+    try:
+        incr_stat("admin_replies")
+        logger.info(f"Admin {admin_id} replies to user {user_id}: {message.text[:60]}")
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data=f"admin_reply_to_user_{admin_id}"))
+        safe_send(
+            user_id,
+            Messages.ADMIN_REPLY.format(html.escape(message.text or "")),
+            parse_mode='HTML',
+            reply_markup=markup
+        )
+        safe_send(admin_id, "✅ Відповідь відправлено користувачу.", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error sending reply from admin to user: {e}", exc_info=True)
+        safe_send(admin_id, f"❌ Не вдалося відправити відповідь: {e}", parse_mode="HTML")
+    clear_admin_reply_target(admin_id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_reply_to_user_"))
+def admin_reply_to_user_callback(call):
+    admin_id = int(call.data.replace("admin_reply_to_user_", ""))
+    user_id = call.from_user.id
+    set_admin_reply_target(admin_id, user_id)
+    safe_send(user_id, "Напишіть свою відповідь адміністратору 👇", parse_mode="HTML")
+
 @bot.callback_query_handler(func=lambda call: call.data == "user_reply_to_admin")
 def user_reply_to_admin_callback(call):
     user_id = call.from_user.id
@@ -422,28 +453,6 @@ def admin_select_user_for_reply(call):
     except Exception as e:
         logger.error(f"Callback error in admin_select_user_for_reply: {e}", exc_info=True)
         safe_send(admin_id, "❌ Трапилась помилка при виборі користувача.", parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_admin_reply_target(m.from_user.id))
-@safe_handler
-def admin_reply_to_selected_user(message):
-    admin_id = message.from_user.id
-    user_id = get_admin_reply_target(admin_id)
-    try:
-        incr_stat("admin_replies")
-        logger.info(f"Admin {admin_id} replies to user {user_id}: {message.text[:60]}")
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data="user_reply_to_admin"))
-        safe_send(
-            user_id,
-            Messages.ADMIN_REPLY.format(html.escape(message.text or "")),
-            parse_mode='HTML',
-            reply_markup=markup
-        )
-        safe_send(admin_id, "✅ Відповідь відправлено користувачу.", parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Error sending reply from admin to user: {e}", exc_info=True)
-        safe_send(admin_id, f"❌ Не вдалося відправити відповідь: {e}", parse_mode="HTML")
-    clear_admin_reply_target(admin_id)
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
 @safe_handler
