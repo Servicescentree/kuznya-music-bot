@@ -28,7 +28,6 @@ config = BotConfig()
 class Messages:
     WELCOME = """Привіт, <b>{}</b>! 👋
 Ласкаво просимо до музичної студії Kuznya Music!
-
 Оберіть дію з меню:"""
     EXAMPLES_INFO = """🎵 <b>Наші роботи:</b>\n\nПослухати приклади можна тут:\n<a href="{}">{}</a>"""
     CHANNEL_INFO = """📢 <b>Підписуйтесь на наш канал:</b>\n<a href="{}">{}</a>"""
@@ -223,27 +222,24 @@ def get_admin_main_keyboard(dm):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
         types.KeyboardButton(f"💬 Активні діалоги ({stats['active_dialogs']})"),
-        types.KeyboardButton("🆕 Новий діалог")
+        types.KeyboardButton("👥 Користувачі")
     )
-    markup.add(
-        types.KeyboardButton(f"👥 Користувачі ({stats['total_users']})"),
-        types.KeyboardButton("📊 Статистика")
-    )
+    markup.add(types.KeyboardButton("📊 Статистика"))
     markup.add(types.KeyboardButton("📢 Розсилка"))
     return markup
 
-def get_admin_dialog_keyboard():
+def get_cancel_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(types.KeyboardButton("❌ Скасувати"))
+    return markup
+
+def get_admin_dialog_keyboard(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
         types.KeyboardButton("❌ Завершити діалог"),
         types.KeyboardButton("🔄 Інший діалог")
     )
     markup.add(types.KeyboardButton("🏠 Головне меню"))
-    return markup
-
-def get_cancel_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-    markup.add(types.KeyboardButton("❌ Скасувати"))
     return markup
 
 # === LOGGING ===
@@ -267,9 +263,9 @@ def get_user_info(user):
         'full_name': f"{user.first_name or ''} {user.last_name or ''}".strip()
     }
 
-def sanitize_input(text): return html.escape(text.strip())
+def sanitize_input(text): return html.escape(str(text).strip())
 
-# === HANDLERS FOR ALL BUTTONS ===
+# === USER HANDLERS ===
 
 @bot.message_handler(func=lambda m: m.text == "💬 Почати діалог")
 def handle_dialog_start(message):
@@ -279,7 +275,7 @@ def handle_dialog_start(message):
         return
     dialog_manager.start_dialog(user_id, config.ADMIN_ID)
     bot.send_message(user_id, Messages.DIALOG_STARTED, reply_markup=get_dialog_keyboard())
-    bot.send_message(config.ADMIN_ID, f"🔔 Новий діалог з користувачем <b>{sanitize_input(message.from_user.full_name)}</b> (id: {user_id})")
+    bot.send_message(config.ADMIN_ID, f"🔔 Новий діалог з користувачем <b>{sanitize_input(message.from_user.full_name)}</b> (id: {user_id})", reply_markup=get_admin_dialog_keyboard(user_id))
 
 @bot.message_handler(func=lambda m: m.text == "🎧 Наші роботи")
 def handle_examples(message):
@@ -305,7 +301,7 @@ def handle_dialog_end(message):
     if dialog_manager.is_user_in_dialog(user_id):
         dialog_manager.end_dialog(user_id)
         bot.send_message(user_id, Messages.DIALOG_ENDED_USER, reply_markup=get_main_keyboard())
-        bot.send_message(config.ADMIN_ID, f"❌ Діалог з {user_id} завершено.")
+        bot.send_message(config.ADMIN_ID, f"❌ Діалог з {user_id} завершено.", reply_markup=get_admin_main_keyboard(dialog_manager))
     else:
         bot.send_message(user_id, "У вас немає активного діалогу.", reply_markup=get_main_keyboard())
 
@@ -340,6 +336,64 @@ def handle_promocode(message):
             Messages.NO_PROMO,
             parse_mode="HTML"
         )
+
+# === ADMIN HANDLERS ===
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "🏠 Головне меню")
+def handle_admin_home(message):
+    stats = dialog_manager.get_statistics()
+    bot.send_message(
+        config.ADMIN_ID,
+        f"{Messages.ADMIN_PANEL}\n\nАктивних діалогів: {stats['active_dialogs']}\nКористувачів: {stats['total_users']}\nПовідомлень: {stats['total_messages']}",
+        reply_markup=get_admin_main_keyboard(dialog_manager),
+        parse_mode="HTML"
+    )
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text.startswith("💬 Активні діалоги"))
+def admin_active_dialogs(message):
+    dialogs = dialog_manager.get_active_dialogs()
+    if not dialogs:
+        bot.send_message(config.ADMIN_ID, "Немає активних діалогів.", reply_markup=get_admin_main_keyboard(dialog_manager))
+        return
+    msg = "<b>Активні діалоги:</b>\n"
+    for d in dialogs:
+        msg += f"- {sanitize_input(d['full_name'])} (id: {d['user_id']})\n"
+    bot.send_message(config.ADMIN_ID, msg, reply_markup=get_admin_main_keyboard(dialog_manager), parse_mode="HTML")
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
+def admin_users(message):
+    users = dialog_manager.get_all_users()
+    msg = "<b>Користувачі бота:</b>\n"
+    for u in users:
+        msg += f"- {sanitize_input(u[2])} (id: {u[0]})\n"
+    bot.send_message(config.ADMIN_ID, msg, reply_markup=get_admin_main_keyboard(dialog_manager), parse_mode="HTML")
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
+def admin_stats(message):
+    stats = dialog_manager.get_statistics()
+    msg = f"<b>Статистика бота:</b>\nКористувачів: {stats['total_users']}\nДіалогів: {stats['total_dialogs']}\nПовідомлень: {stats['total_messages']}\nАптайм: {stats['uptime_seconds']//3600} год"
+    bot.send_message(config.ADMIN_ID, msg, reply_markup=get_admin_main_keyboard(dialog_manager), parse_mode="HTML")
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
+def admin_broadcast(message):
+    dialog_manager.admin_broadcast_mode = True
+    bot.send_message(config.ADMIN_ID, Messages.BROADCAST_PROMPT, reply_markup=get_cancel_keyboard(), parse_mode="HTML")
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and dialog_manager.admin_broadcast_mode and m.text == "❌ Скасувати")
+def admin_broadcast_cancel(message):
+    dialog_manager.admin_broadcast_mode = False
+    bot.send_message(config.ADMIN_ID, Messages.BROADCAST_CANCELLED, reply_markup=get_admin_main_keyboard(dialog_manager))
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and dialog_manager.admin_broadcast_mode)
+def admin_broadcast_send(message):
+    text = sanitize_input(message.text)
+    for user_id in dialog_manager.users:
+        if user_id != config.ADMIN_ID:
+            try:
+                bot.send_message(user_id, f"📢 <b>Оголошення від студії Kuznya Music:</b>\n\n{text}", parse_mode="HTML")
+            except Exception: pass
+    dialog_manager.admin_broadcast_mode = False
+    bot.send_message(config.ADMIN_ID, Messages.BROADCAST_DONE, reply_markup=get_admin_main_keyboard(dialog_manager))
 
 # === START HANDLER (з рефералами) ===
 @bot.message_handler(commands=['start'])
@@ -390,6 +444,57 @@ def handle_start(message):
                 reply_markup=markup,
                 parse_mode="HTML"
             )
+
+# === ROUTING ДІАЛОГУ ===
+@bot.message_handler(func=lambda m: dialog_manager.is_user_in_dialog(m.from_user.id) and not is_admin(m.from_user.id))
+def user_dialog_message(message):
+    user_id = message.from_user.id
+    dialog_manager.save_message(user_id, message.text, is_admin=False)
+    try:
+        bot.send_message(config.ADMIN_ID, f"👤 <b>Користувач {sanitize_input(message.from_user.full_name)}:</b>\n{sanitize_input(message.text)}", reply_markup=get_admin_dialog_keyboard(user_id), parse_mode="HTML")
+        bot.send_message(user_id, "✅ Повідомлення надіслано адміністратору.")
+    except Exception:
+        bot.send_message(user_id, Messages.ERROR_SEND_FAILED)
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and dialog_manager.get_admin_current_dialog(config.ADMIN_ID))
+def admin_dialog_message(message):
+    user_id = dialog_manager.get_admin_current_dialog(config.ADMIN_ID)
+    dialog_manager.save_message(user_id, message.text, is_admin=True)
+    try:
+        bot.send_message(user_id, f"👨‍💼 <b>Адміністратор:</b>\n{sanitize_input(message.text)}")
+        bot.send_message(config.ADMIN_ID, "✅ Надіслано користувачу.", reply_markup=get_admin_dialog_keyboard(user_id))
+    except Exception:
+        bot.send_message(config.ADMIN_ID, Messages.ERROR_SEND_FAILED)
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text and m.text.startswith("🔄 Інший діалог"))
+def admin_switch_dialog(message):
+    dialogs = dialog_manager.get_active_dialogs()
+    for d in dialogs:
+        if d['user_id'] != dialog_manager.get_admin_current_dialog(config.ADMIN_ID):
+            dialog_manager.set_admin_current_dialog(config.ADMIN_ID, d['user_id'])
+            bot.send_message(config.ADMIN_ID, f"🔄 Переключено на діалог з {sanitize_input(d['full_name'])}.", reply_markup=get_admin_dialog_keyboard(d['user_id']))
+            return
+    bot.send_message(config.ADMIN_ID, "Немає інших активних діалогів.", reply_markup=get_admin_main_keyboard(dialog_manager))
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text and m.text == "❌ Завершити діалог")
+def admin_end_dialog(message):
+    user_id = dialog_manager.get_admin_current_dialog(config.ADMIN_ID)
+    if user_id:
+        dialog_manager.end_dialog(user_id)
+        bot.send_message(config.ADMIN_ID, "✅ Діалог завершено.", reply_markup=get_admin_main_keyboard(dialog_manager))
+        bot.send_message(user_id, Messages.DIALOG_ENDED_ADMIN, reply_markup=get_main_keyboard())
+    else:
+        bot.send_message(config.ADMIN_ID, "Немає вибраного діалогу.", reply_markup=get_admin_main_keyboard(dialog_manager))
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text and m.text == "🆕 Новий діалог")
+def admin_new_dialog(message):
+    dialogs = dialog_manager.get_active_dialogs()
+    if dialogs:
+        user_id = dialogs[0]['user_id']
+        dialog_manager.set_admin_current_dialog(config.ADMIN_ID, user_id)
+        bot.send_message(config.ADMIN_ID, f"Вибрано діалог з {sanitize_input(dialogs[0]['full_name'])}.", reply_markup=get_admin_dialog_keyboard(user_id))
+    else:
+        bot.send_message(config.ADMIN_ID, "Немає активних діалогів.", reply_markup=get_admin_main_keyboard(dialog_manager))
 
 # === HEALTHCHECK with Flask ===
 health_app = Flask(__name__)
