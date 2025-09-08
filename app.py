@@ -10,7 +10,6 @@ import logging
 import random
 import string
 from threading import Thread
-from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
 import telebot
