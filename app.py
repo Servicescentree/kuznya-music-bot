@@ -13,21 +13,22 @@ from flask import Flask, jsonify
 import requests  # for self-ping
 import redis     # upstash redis
 
+# -------- REDIS SETUP --------
+REDIS_URL = os.getenv("UPSTASH_REDIS_REST_URL")
+if not REDIS_URL or not REDIS_URL.startswith("redis"):
+    raise ValueError(f"UPSTASH_REDIS_REST_URL is not set or invalid! Got: {REDIS_URL}")
+r = redis.from_url(REDIS_URL, decode_responses=True)
+
 # -------- CONFIG --------
 @dataclass
 class BotConfig:
-    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAF094UtSmRBYB98JUtVwYHzREuVicQFIOs')
-    ADMIN_ID: int = int(os.getenv('ADMIN_ID', '7276479457'))
+    TOKEN: str = os.getenv('BOT_TOKEN', '')
+    ADMIN_ID: int = int(os.getenv('ADMIN_ID', '0'))
     CHANNEL_URL: str = 'https://t.me/kuznya_music'
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
     WEBHOOK_PORT: int = int(os.getenv('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
     RATE_LIMIT_MESSAGES: int = 5  # messages per minute
-
-# -------- REDIS SETUP --------
-REDIS_URL = os.getenv("UPSTASH_REDIS_REST_URL")  # e.g. "rediss://..."
-REDIS_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
-r = redis.from_url(REDIS_URL, password=REDIS_TOKEN, decode_responses=True)
 
 # -------- TEXTS --------
 class Messages:
@@ -90,6 +91,11 @@ logger = logging.getLogger(__name__)
 
 # -------- SETUP --------
 config = BotConfig()
+if not config.TOKEN or not config.TOKEN.startswith(""):
+    raise ValueError("BOT_TOKEN is not set!")
+if not config.ADMIN_ID:
+    raise ValueError("ADMIN_ID is not set!")
+
 bot = telebot.TeleBot(config.TOKEN)
 try:
     bot_info = bot.get_me()
