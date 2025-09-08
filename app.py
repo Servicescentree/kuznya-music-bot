@@ -1,17 +1,15 @@
 import os
 import time
-import html
 import logging
 import sqlite3
 from threading import Thread
-from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
 import telebot
 from telebot import types
 from flask import Flask, jsonify
 
-import requests  # for self-ping
+import requests
 from datetime import datetime
 
 # --- CONFIG ---
@@ -21,25 +19,20 @@ class BotConfig:
     ADMIN_ID: int = int(os.getenv('ADMIN_ID', '7276479457'))
     WEBHOOK_PORT: int = int(os.getenv('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
-    RATE_LIMIT_MESSAGES: int = 5
 
-# --- LOGGING ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]  # Only console logging for Render
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
 config = BotConfig()
-
-# --- DATABASE ---
 DB_FILE = "musicstudio.db"
 
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        # Users
         c.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -52,7 +45,6 @@ def init_db():
                 dialog_with INTEGER DEFAULT NULL
             )
         ''')
-        # Messages
         c.execute('''
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +58,6 @@ def init_db():
                 dialog_id INTEGER
             )
         ''')
-        # Dialogs
         c.execute('''
             CREATE TABLE IF NOT EXISTS dialogs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +72,6 @@ def init_db():
 logger.info("DB: Initializing database...")
 init_db()
 
-# --- TELEGRAM BOT ---
 try:
     bot = telebot.TeleBot(config.TOKEN)
     bot_info = bot.get_me()
@@ -90,7 +80,6 @@ except Exception as token_error:
     logger.error(f"Invalid bot token: {token_error}")
     exit(1)
 
-# --- DATABASE HELPERS ---
 def save_user(user_id, username, full_name):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
@@ -167,19 +156,6 @@ def get_admin_active_dialogs():
         ''', (config.ADMIN_ID,))
         return c.fetchall()
 
-def get_dialog_messages(dialog_id, limit=30):
-    with sqlite3.connect(DB_FILE) as conn:
-        c = conn.cursor()
-        c.execute('''
-            SELECT message_text, is_from_admin, created_at
-            FROM messages
-            WHERE dialog_id = ?
-            ORDER BY id ASC
-            LIMIT ?
-        ''', (dialog_id, limit))
-        return c.fetchall()
-
-# --- KEYBOARDS ---
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
@@ -219,32 +195,21 @@ def cancel_keyboard():
     markup.add(types.KeyboardButton("❌ Скасувати"))
     return markup
 
-# --- STATES (simple in-memory for admin) ---
 admin_state = {}
 BROADCAST = "broadcast"
 ADMIN_DIALOG = "admin_dialog"
 
-# --- MESSAGE HANDLERS ---
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     user = message.from_user
     save_user(user.id, user.username, user.full_name)
     if user.id == config.ADMIN_ID:
-        active_dialogs = get_admin_active_dialogs()
-        if active_dialogs:
-            bot.send_message(
-                user.id,
-                f"👨‍💼 <b>Адмін панель</b>\n\n🟢 У вас є {len(active_dialogs)} активних діалогів\nВикористовуйте кнопки для управління:",
-                reply_markup=admin_keyboard(),
-                parse_mode="HTML"
-            )
-        else:
-            bot.send_message(
-                user.id,
-                "👨‍💼 <b>Адмін панель</b>\n\nЛаскаво просимо в адмін-панель!\nВикористовуйте кнопки для управління ботом.",
-                reply_markup=admin_keyboard(),
-                parse_mode="HTML"
-            )
+        bot.send_message(
+            user.id,
+            "👨‍💼 <b>Адмін панель</b>\n\nВикористовуйте кнопки для управління ботом.",
+            reply_markup=admin_keyboard(),
+            parse_mode="HTML"
+        )
         admin_state.clear()
     else:
         dialog = get_active_dialog(user.id)
@@ -258,7 +223,7 @@ def handle_start(message):
         else:
             bot.send_message(
                 user.id,
-                f"👋 <b>Привіт, {user.first_name}!</b>\n\n🤖 Я універсальний бот-консультант!\n\nВи можете:\n▫️ Почати діалог з адміністратором\n▫️ Вести спілкування в реальному часі\n▫️ Отримувати швидку підтримку\n\nВиберіть дію з меню:",
+                f"👋 <b>Привіт, {user.first_name}!</b>\n\n🤖 Я бот-консультант!\n\nВиберіть дію з меню:",
                 reply_markup=main_keyboard(),
                 parse_mode="HTML"
             )
@@ -266,14 +231,11 @@ def handle_start(message):
 @bot.message_handler(func=lambda m: m.text == "💬 Почати діалог")
 def start_dialog_user(message):
     user = message.from_user
-    if user.id == config.ADMIN_ID:
-        admin_start_new_dialog(message)
-        return
     dialog = get_active_dialog(user.id)
     if dialog:
         bot.send_message(
             user.id,
-            "💬 <b>Ви повернулись до поточного діалогу!</b>\n\nПишіть повідомлення - адміністратор їх бачить.",
+            "💬 <b>Ви повернулись до поточного діалогу!</b>",
             reply_markup=dialog_keyboard(),
             parse_mode="HTML"
         )
@@ -281,7 +243,7 @@ def start_dialog_user(message):
     dialog_id = start_dialog(user.id, config.ADMIN_ID)
     bot.send_message(
         user.id,
-        "✅ <b>Діалог розпочато!</b>\n\n💬 Тепер ви можете вести діалог з адміністратором в реальному часі.\nПишіть повідомлення - адміністратор їх бачить миттєво!",
+        "✅ <b>Діалог розпочато!</b>\nПишіть повідомлення адміністратору.",
         reply_markup=dialog_keyboard(),
         parse_mode="HTML"
     )
@@ -289,8 +251,7 @@ def start_dialog_user(message):
         f"🆕 <b>Новий діалог розпочато!</b>\n\n"
         f"👤 <b>Користувач:</b> {user.full_name}\n"
         f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
-        f"📧 <b>Username:</b> @{user.username or 'немає'}\n\n"
-        f"Використовуйте \"💬 Активні діалоги\" для входу в діалог."
+        f"📧 <b>Username:</b> @{user.username or 'немає'}"
     )
     try:
         bot.send_message(config.ADMIN_ID, admin_text, parse_mode="HTML")
@@ -300,293 +261,35 @@ def start_dialog_user(message):
 @bot.message_handler(func=lambda m: m.text == "❌ Завершити діалог")
 def end_dialog_user(message):
     user_id = message.from_user.id
-    if user_id == config.ADMIN_ID:
-        if admin_state.get("state") == ADMIN_DIALOG:
-            dialog_user_id = admin_state.get("user_id")
-            if dialog_user_id:
-                end_dialog(dialog_user_id)
-                try:
-                    bot.send_message(
-                        dialog_user_id,
-                        "✅ <b>Діалог завершено адміністратором</b>\n\nДякуємо за спілкування! Ви можете розпочати новий діалог в будь-який час.",
-                        reply_markup=main_keyboard(),
-                        parse_mode="HTML"
-                    )
-                except:
-                    pass
-            admin_state.clear()
-            bot.send_message(
-                config.ADMIN_ID,
-                "✅ Діалог завершено",
-                reply_markup=admin_keyboard()
-            )
-        else:
-            bot.send_message(
-                config.ADMIN_ID,
-                "❌ Ви не в діалозі",
-                reply_markup=admin_keyboard()
-            )
-    else:
-        dialog = get_active_dialog(user_id)
-        if not dialog:
-            bot.send_message(
-                user_id,
-                "❌ Ви не в діалозі",
-                reply_markup=main_keyboard()
-            )
-            return
-        end_dialog(user_id)
-        bot.send_message(
-            user_id,
-            "✅ <b>Діалог завершено</b>\n\nДякуємо за спілкування! Ви можете розпочати новий діалог в будь-який час.",
-            reply_markup=main_keyboard(),
-            parse_mode="HTML"
-        )
-        try:
-            user_info = get_user_info(user_id)
-            if user_info:
-                username, full_name, _, _ = user_info
-                bot.send_message(
-                    config.ADMIN_ID,
-                    f"❌ <b>Діалог завершено користувачем</b>\n\n👤 {full_name} (@{username or 'немає'})",
-                    parse_mode="HTML"
-                )
-        except:
-            pass
-
-@bot.message_handler(func=lambda m: m.text == "💬 Активні діалоги" and m.from_user.id == config.ADMIN_ID)
-def admin_active_dialogs(message):
-    dialogs = get_admin_active_dialogs()
-    if not dialogs:
-        bot.send_message(
-            config.ADMIN_ID,
-            "💬 <b>Активні діалоги</b>\n\nНа даний момент немає активних діалогів.\nВикористовуйте \"🆕 Почати новий діалог\" для створення діалогу з користувачем.",
-            parse_mode="HTML"
-        )
-        return
-    response = "💬 <b>Ваші активні діалоги:</b>\n\n"
-    markup = types.InlineKeyboardMarkup()
-    for dialog_id, user_id, username, full_name, started_at, msg_count in dialogs:
-        started = datetime.fromisoformat(started_at).strftime("%d.%m %H:%M")
-        response += f"👤 <b>{full_name}</b>\n📧 @{username or 'немає'} | 🆔 <code>{user_id}</code>\n📅 Почато: {started} | 💬 Повідомлень: {msg_count}\n\n"
-        markup.add(types.InlineKeyboardButton(
-            f"💬 {full_name[:20]}{'...' if len(full_name) > 20 else ''}",
-            callback_data=f"enter_dialog_{user_id}"
-        ))
-    bot.send_message(config.ADMIN_ID, response, reply_markup=markup, parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: m.text == "🆕 Почати новий діалог" and m.from_user.id == config.ADMIN_ID)
-def admin_start_new_dialog(message):
-    users = get_all_users()
-    if not users:
-        bot.send_message(config.ADMIN_ID, "👥 Користувачів ще немає")
-        return
-    free_users = [u for u in users if not u[5]]
-    response = "🆕 <b>Почати новий діалог з:</b>\n\n"
-    markup = types.InlineKeyboardMarkup()
-    if not free_users:
-        bot.send_message(
-            config.ADMIN_ID,
-            "🆕 <b>Почати новий діалог</b>\n\n❌ Всі користувачі вже мають активні діалоги.\nВикористовуйте \"💬 Активні діалоги\" для перегляду поточних діалогів.",
-            parse_mode="HTML"
-        )
-        return
-    for user_id, username, full_name, total_msg, last_activity, in_dialog in free_users[:15]:
-        last_active = datetime.fromisoformat(last_activity).strftime("%d.%m %H:%M")
-        response += f"👤 <b>{full_name}</b>\n📧 @{username or 'немає'} | 💬 Повідомлень: {total_msg}\n⏰ Остання активність: {last_active}\n\n"
-        markup.add(types.InlineKeyboardButton(
-            f"💬 {full_name[:25]}{'...' if len(full_name) > 25 else ''}",
-            callback_data=f"start_new_dialog_{user_id}"
-        ))
-    if len(free_users) > 15:
-        response += f"... і ще {len(free_users) - 15} вільних користувачів"
-    bot.send_message(config.ADMIN_ID, response, reply_markup=markup, parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: m.text == "🔄 Перейти до іншого діалогу" and m.from_user.id == config.ADMIN_ID)
-def admin_switch_dialog(message):
-    admin_state.clear()
-    admin_active_dialogs(message)
-
-@bot.message_handler(func=lambda m: m.text == "🏠 Головне меню" and m.from_user.id == config.ADMIN_ID)
-def admin_return_to_menu(message):
-    admin_state.clear()
-    bot.send_message(
-        config.ADMIN_ID,
-        "🏠 Повернення до головного меню",
-        reply_markup=admin_keyboard()
-    )
-
-@bot.message_handler(func=lambda m: m.text == "📢 Розсилка всім" and m.from_user.id == config.ADMIN_ID)
-def broadcast_message(message):
-    admin_state.clear()
-    admin_state["state"] = BROADCAST
-    bot.send_message(
-        config.ADMIN_ID,
-        "📢 <b>Розсилка повідомлення</b>\n\nНапишіть текст для розсилки всім користувачам:",
-        reply_markup=cancel_keyboard(),
-        parse_mode="HTML"
-    )
-
-@bot.message_handler(func=lambda m: admin_state.get("state") == BROADCAST and m.from_user.id == config.ADMIN_ID)
-def process_broadcast(message):
-    if message.text == "❌ Скасувати":
-        admin_state.clear()
-        bot.send_message(
-            config.ADMIN_ID, "❌ Розсилка скасована", reply_markup=admin_keyboard()
-        )
-        return
-    broadcast_text = message.text
-    users = get_all_users()
-    if not users:
-        bot.send_message(
-            config.ADMIN_ID,
-            "❌ Немає користувачів для розсилки",
-            reply_markup=admin_keyboard()
-        )
-        admin_state.clear()
-        return
-    bot.send_message(config.ADMIN_ID, "📡 Починаю розсилку... Зачекайте.")
-    success_count = 0
-    blocked_count = 0
-    for user_id, username, full_name, _, _, _ in users:
-        if user_id == config.ADMIN_ID:
-            continue
-        try:
-            bot.send_message(
-                user_id,
-                f"📢 <b>Повідомлення адміністратора:</b>\n\n{broadcast_text}",
-                parse_mode="HTML"
-            )
-            success_count += 1
-        except Exception as e:
-            blocked_count += 1
-    bot.send_message(
-        config.ADMIN_ID,
-        f"📊 <b>Розсилка завершена!</b>\n\n✅ Надіслано: {success_count}\n❌ Заблоковано/помилки: {blocked_count}\n📋 Всього користувачів: {len(users)}\n💬 Текст розсилки: <i>{broadcast_text}</i>",
-        reply_markup=admin_keyboard(),
-        parse_mode="HTML"
-    )
-    admin_state.clear()
-
-@bot.message_handler(func=lambda m: m.text == "ℹ️ Про бота")
-def about_bot(message):
-    bot.send_message(
-        message.chat.id,
-        "ℹ️ <b>Про бота</b>\n\n🤖 Я універсальний бот-консультант з підтримкою діалогів!\n\nМої можливості:\n▫️ Гнучкі діалоги в реальному часі з адміністратором\n▫️ Можливість повертатися до діалогів\n▫️ Збереження всіх спілкувань\n▫️ Швидка відповідь на питання\n\n💻 Версія: 3.0 (з покращеними діалогами)\n📅 Оновлено: 2025",
-        parse_mode="HTML"
-    )
-
-@bot.message_handler(func=lambda m: m.text == "📞 Контакти")
-def contacts(message):
-    bot.send_message(
-        message.chat.id,
-        "📞 <b>Контакти</b>\n\n🤖 Для зв'язку використовуйте цього бота\n💬 Розпочніть діалог і спілкуйтесь в реальному часі\n\n⏰ Адміністратор зазвичай онлайн і відповідає швидко",
-        parse_mode="HTML"
-    )
-
-@bot.message_handler(func=lambda m: m.text == "👥 Список користувачів" and m.from_user.id == config.ADMIN_ID)
-def users_list(message):
-    users = get_all_users()
-    if not users:
-        bot.send_message(config.ADMIN_ID, "👥 Користувачів ще немає")
-        return
-    response = "👥 <b>Список всіх користувачів:</b>\n\n"
-    for user_id, username, full_name, total_msg, last_activity, in_dialog in users[:20]:
-        last_active = datetime.fromisoformat(last_activity).strftime("%d.%m %H:%M")
-        status = "🟢 В діалозі" if in_dialog else "⚪ Вільний"
-        response += f"👤 <b>{full_name}</b> {status}\n🆔 ID: <code>{user_id}</code>\n📧 @{username or 'немає'}\n📨 Повідомлень: {total_msg}\n⏰ Остання активність: {last_active}\n\n"
-    if len(users) > 20:
-        response += f"... і ще {len(users) - 20} користувачів"
-    bot.send_message(config.ADMIN_ID, response, parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: m.text == "📊 Статистика" and m.from_user.id == config.ADMIN_ID)
-def statistics(message):
-    with sqlite3.connect(DB_FILE) as conn:
-        c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM users WHERE user_id != ?", (config.ADMIN_ID,))
-        total_users = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM messages")
-        total_messages = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM dialogs")
-        total_dialogs = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM dialogs WHERE is_active = 1")
-        active_dialogs = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM users WHERE in_dialog = 1")
-        users_in_dialog = c.fetchone()[0]
-    bot.send_message(
-        config.ADMIN_ID,
-        f"📊 <b>Статистика бота</b>\n\n👥 Всього користувачів: {total_users}\n📨 Всього повідомлень: {total_messages}\n💬 Всього діалогів: {total_dialogs}\n🟢 Активних діалогів: {active_dialogs}\n👤 Користувачів в діалозі: {users_in_dialog}",
-        parse_mode="HTML"
-    )
-
-# --- CALLBACK HANDLERS ---
-@bot.callback_query_handler(func=lambda call: call.data.startswith("start_new_dialog_"))
-def start_new_dialog_callback(call):
-    if call.from_user.id != config.ADMIN_ID:
-        return
-    user_id = int(call.data.split("_")[3])
-    user_info = get_user_info(user_id)
-    if not user_info:
-        bot.answer_callback_query(call.id, "Користувача не знайдено")
-        return
-    username, full_name, in_dialog, dialog_with = user_info
-    if in_dialog:
-        bot.answer_callback_query(call.id, "Користувач вже в діалозі")
-        return
-    dialog_id = start_dialog(user_id, config.ADMIN_ID)
-    admin_state.clear()
-    admin_state["state"] = ADMIN_DIALOG
-    admin_state["user_id"] = user_id
-    admin_state["dialog_id"] = dialog_id
-    bot.edit_message_text(
-        f"✅ <b>Новий діалог розпочато з {full_name}!</b>\n\n💬 Пишіть повідомлення - користувач їх бачить миттєво!",
-        call.message.chat.id, call.message.message_id, parse_mode="HTML"
-    )
-    bot.send_message(
-        config.ADMIN_ID,
-        "Використовуйте кнопки для керування діалогом:",
-        reply_markup=admin_dialog_keyboard()
-    )
-    try:
-        bot.send_message(
-            user_id,
-            "💬 <b>Адміністратор розпочав з вами діалог!</b>\n\nПишіть повідомлення - адміністратор їх бачить в реальному часі.",
-            reply_markup=dialog_keyboard(),
-            parse_mode="HTML"
-        )
-    except:
-        pass
-    bot.answer_callback_query(call.id)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("enter_dialog_"))
-def admin_enter_dialog(call):
-    if call.from_user.id != config.ADMIN_ID:
-        return
-    user_id = int(call.data.split("_")[2])
     dialog = get_active_dialog(user_id)
     if not dialog:
-        bot.answer_callback_query(call.id, "Діалог не активний")
+        bot.send_message(
+            user_id,
+            "❌ Ви не в діалозі",
+            reply_markup=main_keyboard()
+        )
         return
-    admin_state.clear()
-    admin_state["state"] = ADMIN_DIALOG
-    admin_state["user_id"] = user_id
-    admin_state["dialog_id"] = dialog[0]
-    user_info = get_user_info(user_id)
-    username, full_name, _, _ = user_info
-    bot.edit_message_text(
-        f"💬 <b>Діалог з {full_name}</b>\n\nПишіть повідомлення - користувач їх бачить миттєво!",
-        call.message.chat.id, call.message.message_id, parse_mode="HTML"
-    )
+    end_dialog(user_id)
     bot.send_message(
-        config.ADMIN_ID,
-        "Використовуйте кнопки для керування діалогом:",
-        reply_markup=admin_dialog_keyboard()
+        user_id,
+        "✅ <b>Діалог завершено</b>\nДякуємо за спілкування!",
+        reply_markup=main_keyboard(),
+        parse_mode="HTML"
     )
-    bot.answer_callback_query(call.id)
+    try:
+        user_info = get_user_info(user_id)
+        if user_info:
+            username, full_name, _, _ = user_info
+            bot.send_message(
+                config.ADMIN_ID,
+                f"❌ <b>Діалог завершено користувачем</b>\n\n👤 {full_name} (@{username or 'немає'})",
+                parse_mode="HTML"
+            )
+    except:
+        pass
 
-# --- ДІАЛОГОВІ ПОВІДОМЛЕННЯ ---
-@bot.message_handler(func=lambda m: get_active_dialog(m.from_user.id) is not None and m.text not in [
-    "❌ Завершити діалог", "🔄 Перейти до іншого діалогу", "🏠 Головне меню"])
+# --- ЮЗЕР ПИШЕ (ДІАЛОГ) ---
+@bot.message_handler(func=lambda m: get_active_dialog(m.from_user.id) is not None and m.from_user.id != config.ADMIN_ID)
 def handle_user_dialog_message(message):
     user = message.from_user
     dialog = get_active_dialog(user.id)
@@ -600,69 +303,44 @@ def handle_user_dialog_message(message):
     dialog_id, admin_id = dialog
     message_text = message.text or "[Медіа файл]"
     save_message(user.id, user.username, user.full_name, message_text, "text", False, dialog_id)
-    admin_text = f"💬 <b>Діалог з {user.full_name}</b>\n\n👤 {message_text}"
-    try:
-        bot.send_message(admin_id, admin_text, parse_mode="HTML")
-    except Exception as e:
-        logger.warning(f"ADMIN dialog send error: {e}")
-    # Додаємо підтвердження для юзера:
+    # Forward адміну, щоб reply працював
+    bot.forward_message(admin_id, user.id, message.message_id)
     bot.send_message(
         user.id,
         "✅ Повідомлення відправлено!",
         reply_to_message_id=message.message_id
     )
 
-@bot.message_handler(func=lambda m: m.from_user.id == config.ADMIN_ID and admin_state.get("state") == ADMIN_DIALOG and m.text not in [
-    "❌ Завершити діалог", "🔄 Перейти до іншого діалогу", "🏠 Головне меню"])
-def handle_admin_dialog_message(message):
-    data = admin_state
-    user_id = data.get("user_id")
-    dialog_id = data.get("dialog_id")
-    if not user_id or not dialog_id:
-        bot.send_message(config.ADMIN_ID, "Помилка: дані діалогу втрачено", reply_markup=admin_keyboard())
-        admin_state.clear()
-        return
-    message_text = message.text or "[Медіа файл]"
-    save_message(user_id, "admin", "Адміністратор", message_text, "text", True, dialog_id)
-    user_text = f"👨‍💼 <b>Адмін:</b> {message_text}"
-    try:
-        bot.send_message(user_id, user_text, parse_mode="HTML")
-    except Exception as e:
-        bot.send_message(config.ADMIN_ID, f"❌ Не вдалося надіслати користувачу: {e}")
-    # Додаємо підтвердження для адміна:
-    bot.send_message(
-        config.ADMIN_ID,
-        "✅ Повідомлення відправлено!",
-        reply_to_message_id=message.message_id
-    )
-
-# --- UNKNOWN HANDLER ---
-@bot.message_handler(func=lambda m: True)
-def handle_all_messages(message):
-    user_id = message.from_user.id
-    save_user(user_id, message.from_user.username, message.from_user.full_name)
-    if user_id != config.ADMIN_ID:
+# --- АДМІН ВІДПОВІДАЄ ЧЕРЕЗ REPLY ---
+@bot.message_handler(func=lambda m: m.from_user.id == config.ADMIN_ID)
+def handle_admin_message(message):
+    # Якщо reply на forward від бота
+    if message.reply_to_message and message.reply_to_message.forward_from:
+        user_id = message.reply_to_message.forward_from.id
         dialog = get_active_dialog(user_id)
         if dialog:
-            handle_user_dialog_message(message)
-            return
-    elif user_id == config.ADMIN_ID and admin_state.get("state") == ADMIN_DIALOG:
-        handle_admin_dialog_message(message)
+            dialog_id = dialog[0]
+        else:
+            dialog_id = start_dialog(user_id, config.ADMIN_ID)
+        save_message(user_id, "admin", "Адміністратор", message.text, "text", True, dialog_id)
+        user_text = f"👨‍💼 <b>Адмін:</b> {message.text}"
+        try:
+            bot.send_message(user_id, user_text, parse_mode="HTML")
+            bot.send_message(
+                config.ADMIN_ID,
+                "✅ Повідомлення відправлено!",
+                reply_to_message_id=message.message_id
+            )
+        except Exception as e:
+            bot.send_message(config.ADMIN_ID, f"❌ Не вдалося надіслати користувачу: {e}")
         return
-    if user_id == config.ADMIN_ID:
-        bot.send_message(
-            user_id,
-            "❓ Невідома команда. Використовуйте кнопки меню.",
-            reply_markup=admin_keyboard()
-        )
-    else:
-        bot.send_message(
-            user_id,
-            "❓ Не зрозумів вас. Використовуйте кнопки меню або напишіть /start",
-            reply_markup=main_keyboard()
-        )
+    # Якщо ні — показує підказку
+    bot.send_message(
+        config.ADMIN_ID,
+        "❓ Щоб відповісти користувачу — відповідайте на forward-повідомлення від юзера.",
+        reply_markup=admin_keyboard()
+    )
 
-# --- FLASK SERVER FOR RENDER/UPTIME/SELF-PING ---
 app = Flask(__name__)
 bot_start_time = time.time()
 
@@ -753,7 +431,6 @@ def run_flask():
         threaded=True
     )
 
-# --- SELF-PING ---
 def self_ping():
     port = config.WEBHOOK_PORT
     url = f"http://localhost:{port}/keepalive"
@@ -763,32 +440,18 @@ def self_ping():
             print(f"[SELF-PING] Pinged {url} ({r.status_code})")
         except Exception as e:
             print(f"[SELF-PING] Error pinging {url}: {e}")
-        time.sleep(300)  # 5 хвилин
+        time.sleep(300)
 
-# --- MAIN ---
 if __name__ == "__main__":
     try:
         logger.info("Starting Music Studio Bot...")
         flask_thread = Thread(target=run_flask, daemon=True)
         flask_thread.start()
-        logger.info(f"Flask server started on port {config.WEBHOOK_PORT}")
         selfping_thread = Thread(target=self_ping, daemon=True)
         selfping_thread.start()
-        logger.info("Self-ping thread started (every 5 minutes).")
-        logger.info("Health check endpoints available:")
-        logger.info(f"  - Main: http://localhost:{config.WEBHOOK_PORT}/")
-        logger.info(f"  - Health: http://localhost:{config.WEBHOOK_PORT}/health")
-        logger.info(f"  - Ping: http://localhost:{config.WEBHOOK_PORT}/ping")
-        logger.info(f"  - Status: http://localhost:{config.WEBHOOK_PORT}/status")
-        try:
-            bot.remove_webhook()
-            bot.stop_polling()
-        except Exception as clear_error:
-            logger.warning(f"Error clearing previous instances: {clear_error}")
         time.sleep(5)
         logger.info("🎵 Music Studio Bot started successfully!")
         logger.info(f"Admin ID: {config.ADMIN_ID}")
-        logger.info("Bot is polling for messages...")
         bot.polling(none_stop=True, interval=1, timeout=30)
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
