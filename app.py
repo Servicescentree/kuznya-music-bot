@@ -42,7 +42,17 @@ class Messages:
     BROADCAST_PROMPT = "<b>📢 Введіть текст для розсилки всім користувачам або натисніть '❌ Скасувати'</b>"
     BROADCAST_DONE = "<b>📊 Розсилка завершена!</b>"
     BROADCAST_CANCELLED = "<b>❌ Розсилка скасована.</b>"
-    SHARE_BOT = """🎉 Запроси друга у музичний бот!\nПросто поділись цим посиланням:\n<a href="{}">{}</a>\n\nЗа кожного друга — бонус чи знижка! Якщо запросиш 3 друзів — отримаєш промокод на знижку 25% на запис!"""
+    # PATCHED BLOCK: оновлений текст з інструкцією для користувача
+    SHARE_BOT = """🎉 Запроси друга у музичний бот!
+Просто скопіюй і надішли це посилання будь-кому в Telegram:
+<a href="{0}">{1}</a>
+
+За кожного друга — бонус чи знижка! Якщо запросиш 3 друзів — отримаєш промокод на знижку 25% на запис!
+
+ℹ️ Щоб поділитися:
+— Натисни і утримуй це повідомлення, обери "Переслати" (Forward) або
+— Скопіюй посилання та відправ у будь-який чат.
+"""
     BONUS_PROMO = "<b>🎁 Ваш промокод на знижку 25%:</b> <code>{}</code>\nПокажіть цей код адміністратору при записі!"
     NO_PROMO = "У вас ще немає промокоду. Запросіть 3 друзів та отримайте знижку!"
     FRIEND_JOINED = "🎉 Ваш друг <b>{}</b> приєднався за вашим реферальним посиланням! Дякуємо!"
@@ -51,18 +61,18 @@ class Messages:
 # === ENHANCED DIALOG MANAGER + REFERRALS ===
 class EnhancedDialogManager:
     def __init__(self):
-        self.active_dialogs = {}  # user_id -> {admin_id, started_at, message_count, dialog_id}
-        self.admin_current_dialog = {}  # admin_id -> user_id
-        self.message_history = {}  # dialog_id -> [{'user_id', 'message', 'timestamp', 'is_admin'}]
-        self.users = {}  # user_id -> {...}
-        self.user_states = {}  # user_id -> state
+        self.active_dialogs = {}
+        self.admin_current_dialog = {}
+        self.message_history = {}
+        self.users = {}
+        self.user_states = {}
         self.stats = {
             'total_messages': 0,
             'total_dialogs': 0,
             'bot_start_time': time.time()
         }
-        self.referrals = {}  # referrer_id -> set(new_user_ids)
-        self.promo_codes = {}  # user_id -> promo_code
+        self.referrals = {}
+        self.promo_codes = {}
         self.admin_broadcast_mode = False
         self.broadcast_text = ""
 
@@ -305,6 +315,7 @@ def handle_dialog_end(message):
     else:
         bot.send_message(user_id, "У вас немає активного діалогу.", reply_markup=get_main_keyboard())
 
+# PATCHED HANDLER for "Поділитись ботом"
 @bot.message_handler(func=lambda m: m.text == "🔗 Поділитись ботом")
 def handle_share_bot(message):
     user_id = message.from_user.id
@@ -313,11 +324,12 @@ def handle_share_bot(message):
     safe_link = html.escape(referral_link)
     text = Messages.SHARE_BOT.format(safe_link, safe_link)
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("Поділитись ботом", url=referral_link))
+    markup.add(types.InlineKeyboardButton("Відкрити бота", url=referral_link))
     bot.send_message(
         user_id,
         text,
-        reply_markup=markup
+        reply_markup=markup,
+        parse_mode="HTML"
     )
 
 @bot.message_handler(commands=['promocode'])
@@ -514,7 +526,7 @@ def background_ping_bot():
             logging.info("Bot keepalive ping sent to Telegram")
         except Exception as e:
             logging.error(f"Ping error: {e}")
-        time.sleep(300)  # кожні 5 хвилин
+        time.sleep(300)
 
 # === MAIN EXECUTION ===
 if __name__ == "__main__":
