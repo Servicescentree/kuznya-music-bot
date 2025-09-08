@@ -277,7 +277,7 @@ def format_admin_request(user, user_id, message_text, dt):
         f"{html.escape(message_text)}"
     )
 
-# -------- HANDLЕРИ --------
+# -------- HANDLERS --------
 
 @bot.message_handler(commands=["start"])
 @safe_handler
@@ -330,15 +330,9 @@ def handle_contacts(message):
 @bot.message_handler(func=lambda m: m.text == "🎤 Записати трек")
 @safe_handler
 def handle_record(message):
-    if get_user_state(message.from_user.id) == UserStates.WAITING_FOR_MESSAGE:
-        safe_send(
-            message.chat.id,
-            "Ви вже можете надіслати свої побажання для запису треку! Просто напишіть повідомлення 👇",
-            parse_mode="HTML"
-        )
-        return
-    set_user_state(message.from_user.id, UserStates.WAITING_FOR_MESSAGE)
+    # Завжди надсилаємо prompt, навіть якщо вже у діалозі
     safe_send(message.chat.id, Messages.RECORDING_PROMPT, parse_mode="HTML")
+    set_user_state(message.from_user.id, UserStates.WAITING_FOR_MESSAGE)
 
 @bot.message_handler(func=lambda m: get_user_state(m.from_user.id) == UserStates.WAITING_FOR_MESSAGE)
 @safe_handler
