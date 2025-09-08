@@ -10,8 +10,8 @@ import telebot
 from telebot import types
 from flask import Flask, jsonify, request
 
-import requests  # for self-ping
-import redis     # upstash redis
+import requests
+import redis
 
 # -------- REDIS SETUP --------
 REDIS_URL = os.getenv("UPSTASH_REDIS_REST_URL")
@@ -82,7 +82,6 @@ class UserStates:
     WAITING_FOR_MESSAGE = 'waiting_for_message'
     ADMIN_REPLYING = 'admin_replying'
 
-# --- Для розсилки ---
 BROADCAST_STATE = 'waiting_for_broadcast_message'
 
 # -------- LOGGING --------
@@ -95,6 +94,15 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# -------- MARKDOWN ESCAPE --------
+try:
+    from telebot.util import escape_markdown
+except ImportError:
+    def escape_markdown(text):
+        for c in ('_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'):
+            text = text.replace(c, f'\\{c}')
+        return text
 
 # -------- ERROR HANDLING DECORATOR --------
 def safe_handler(func):
@@ -114,15 +122,6 @@ def safe_send(chat_id, text, **kwargs):
         bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
         logger.error(f"Telegram send_message error: {e}", exc_info=True)
-
-# -------- MARKDOWN ESCAPE --------
-try:
-    from telebot.util import escape_markdown
-except ImportError:
-    def escape_markdown(text):
-        for c in ('_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'):
-            text = text.replace(c, f'\\{c}')
-        return text
 
 # -------- SETUP --------
 config = BotConfig()
@@ -160,11 +159,6 @@ def get_main_keyboard():
     )
     return markup
 
-def get_chat_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-    markup.add(types.KeyboardButton("❌ Завершити діалог"))
-    return markup
-
 def get_admin_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
@@ -196,10 +190,7 @@ def check_rate_limit(user_id: int) -> bool:
         return count <= config.RATE_LIMIT_MESSAGES
     except Exception as e:
         logger.error(f"Redis error in check_rate_limit: {e}", exc_info=True)
-        return True  # fail-open
-
-def sanitize_input(text: str) -> str:
-    return html.escape(text.strip())
+        return True
 
 def set_user_state(user_id: int, state: str):
     try:
@@ -261,7 +252,6 @@ def send_user_request_to_admin(user_id, text):
     except Exception as e:
         logger.error(f"Failed to send user request to admin: {e}", exc_info=True)
 
-# ------- Статистика -------
 def incr_stat(key):
     try:
         r.incr(f"stat:{key}")
@@ -275,7 +265,6 @@ def get_stat(key):
         logger.error(f"Redis error in get_stat: {e}", exc_info=True)
         return 0
 
-# ------- Broadcast state for admin -------
 def set_admin_state(user_id, state):
     try:
         r.set(f"admin:{user_id}:state", state)
@@ -308,7 +297,6 @@ def handle_start(message):
         reply_markup=get_main_keyboard()
     )
 
-# --- Основні кнопки меню ---
 @bot.message_handler(func=lambda m: m.text == "🎧 Приклади робіт")
 @safe_handler
 def handle_examples(message):
@@ -329,7 +317,6 @@ def handle_contacts(message):
 def handle_record(message):
     safe_send(message.chat.id, Messages.RECORDING_PROMPT, parse_mode="Markdown")
 
-# Користувач надсилає заявку (приклад для хендлера заявки)
 @bot.message_handler(func=lambda m: m.text and m.text.lower().startswith("запис"))
 @safe_handler
 def handle_user_request(message):
@@ -375,7 +362,7 @@ def admin_reply_to_selected_user(message):
     try:
         incr_stat("admin_replies")
         logger.info(f"Admin {admin_id} replies to user {user_id}: {message.text[:60]}")
-        # ВАЖЛИВО! Екрануємо текст адміна через escape_markdown
+        # ESCAPE MARKDOWN для відповіді!
         safe_send(user_id, Messages.ADMIN_REPLY.format(escape_markdown(message.text)), parse_mode='Markdown')
         safe_send(admin_id, "✅ Відповідь відправлено користувачу.")
     except Exception as e:
@@ -406,7 +393,6 @@ def admin_stats(message):
     )
     safe_send(message.chat.id, msg, parse_mode="HTML")
 
-# --- Розсилка ---
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
 @safe_handler
 def admin_broadcast_start(message):
@@ -417,7 +403,6 @@ def admin_broadcast_start(message):
 @safe_handler
 def admin_broadcast_process(message):
     clear_admin_state(message.from_user.id)
-    # Екрануємо повідомлення розсилки для HTML!
     text = html.escape(message.text)
     users = get_all_user_ids()
     delivered = 0
@@ -438,7 +423,6 @@ def admin_broadcast_process(message):
                                f"Помилок: <b>{errors}</b>", parse_mode="HTML")
     logger.info(f"BROADCAST: sent={delivered}, errors={errors}, total={len(users)}")
 
-# --- Fallback хендлер --- (має бути останнім!)
 @bot.message_handler(func=lambda message: True)
 @safe_handler
 def handle_other_messages(message):
@@ -535,7 +519,6 @@ def keep_alive():
         logger.error(f"/keepalive error: {e}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
 
-# --- WEBHOOK ENDPOINT ---
 @app.route(f"/bot{config.TOKEN}", methods=["POST"])
 def webhook():
     if request.headers.get("content-type") == "application/json":
@@ -566,7 +549,7 @@ def self_ping():
             print(f"[SELF-PING] Pinged {url} ({r2.status_code})")
         except Exception as e:
             print(f"[SELF-PING] Error pinging {url}: {e}")
-        time.sleep(300)  # 5 хвилин
+        time.sleep(300)
 
 if __name__ == "__main__":
     try:
