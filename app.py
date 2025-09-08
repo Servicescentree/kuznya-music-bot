@@ -11,6 +11,7 @@ from telebot import types
 from flask import Flask, jsonify
 
 import requests  # for self-ping
+import redis     # upstash redis
 
 # -------- CONFIG --------
 @dataclass
@@ -22,6 +23,11 @@ class BotConfig:
     WEBHOOK_PORT: int = int(os.getenv('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
     RATE_LIMIT_MESSAGES: int = 5  # messages per minute
+
+# -------- REDIS SETUP --------
+REDIS_URL = os.getenv("UPSTASH_REDIS_REST_URL")  # e.g. "rediss://..."
+REDIS_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+r = redis.from_url(REDIS_URL, password=REDIS_TOKEN, decode_responses=True)
 
 # -------- TEXTS --------
 class Messages:
@@ -92,10 +98,6 @@ except Exception as token_error:
     logger.error(f"Invalid bot token: {token_error}")
     exit(1)
 
-user_states = {}       # user_id: state
-rate_limits = {}       # user_id: {'count': int, 'last_reset': timestamp}
-admin_replies = {}     # admin_id: target_user_id
-
 # -------- UTILS --------
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(config.ADMIN_ID)
@@ -148,21 +150,42 @@ def validate_message(message) -> tuple[bool, str]:
     return True, ""
 
 def check_rate_limit(user_id: int) -> bool:
-    current_time = int(time.time())
-    if user_id not in rate_limits:
-        rate_limits[user_id] = {'count': 1, 'last_reset': current_time}
-        return True
-    user_limit = rate_limits[user_id]
-    if current_time - user_limit['last_reset'] > 60:
-        rate_limits[user_id] = {'count': 1, 'last_reset': current_time}
-        return True
-    if user_limit['count'] < config.RATE_LIMIT_MESSAGES:
-        user_limit['count'] += 1
-        return True
-    return False
+    key = f"rate:{user_id}"
+    pipe = r.pipeline()
+    pipe.incr(key)
+    pipe.expire(key, 60)
+    count, _ = pipe.execute()
+    return count <= config.RATE_LIMIT_MESSAGES
 
 def sanitize_input(text: str) -> str:
     return html.escape(text.strip())
+
+def set_user_state(user_id: int, state: str):
+    r.set(f"user:{user_id}:state", state)
+
+def get_user_state(user_id: int) -> str:
+    return r.get(f"user:{user_id}:state") or UserStates.IDLE
+
+def get_all_user_ids():
+    ids = []
+    for key in r.scan_iter("user:*:state"):
+        uid = key.split(":")[1]
+        if uid not in ids:
+            ids.append(int(uid))
+    return ids
+
+def add_user(user_id: int):
+    set_user_state(user_id, UserStates.IDLE)
+
+def set_admin_reply_target(admin_id: int, user_id: int):
+    r.set(f"admin:{admin_id}:reply", user_id)
+
+def get_admin_reply_target(admin_id: int) -> int:
+    uid = r.get(f"admin:{admin_id}:reply")
+    return int(uid) if uid else None
+
+def clear_admin_reply_target(admin_id: int):
+    r.delete(f"admin:{admin_id}:reply")
 
 # -------- HANDLERS --------
 
@@ -178,14 +201,12 @@ def handle_start(message):
         )
     else:
         markup = get_main_keyboard()
-        user_states[message.from_user.id] = UserStates.IDLE
+        add_user(message.from_user.id)
         bot.send_message(
             message.chat.id,
             Messages.WELCOME.format(user_info['first_name']),
             reply_markup=markup
         )
-
-# --- Хендлери для адмінських кнопок (мають бути вище catch-all!) ---
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
 def handle_admin_broadcast(message):
@@ -194,7 +215,7 @@ def handle_admin_broadcast(message):
     def broadcast_handler(msg):
         txt = msg.text
         count = 0
-        for uid in user_states:
+        for uid in get_all_user_ids():
             if uid != config.ADMIN_ID:
                 try:
                     bot.send_message(uid, f"📢 [Розсилка]\n\n{txt}")
@@ -207,18 +228,24 @@ def handle_admin_broadcast(message):
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
 def handle_show_stats(message):
-    active_users = len([uid for uid, state in user_states.items() if state == UserStates.WAITING_FOR_MESSAGE])
-    total_users = len(user_states)
-    active_hour = len([uid for uid, data in rate_limits.items() if time.time() - data['last_reset'] < 3600])
+    all_users = get_all_user_ids()
+    active_users = [uid for uid in all_users if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
+    total_users = len(all_users)
+    recent_users = 0
+    now = time.time()
+    for uid in all_users:
+        key = f"rate:{uid}"
+        if r.ttl(key) > 0:
+            recent_users += 1
     stats_text = f"""📊 *Детальна статистика*
 
 👥 Всього користувачів: {total_users}
-💬 Активних чатів: {active_users}
-⏰ Активних за годину: {active_hour}
+💬 Активних чатів: {len(active_users)}
+⏰ Активних за годину: {recent_users}
 📅 Дата: {time.strftime('%d.%m.%Y %H:%M')}
 
 🔧 Технічна інформація:
-• Зберігання: In-Memory (Render-optimized)
+• Зберігання: Upstash Redis
 • Логування: активне
 • Рейт-лімітинг: {config.RATE_LIMIT_MESSAGES} повідомлень/хвилину"""
     bot.send_message(
@@ -229,7 +256,7 @@ def handle_show_stats(message):
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
 def handle_admin_active_dialogs(message):
-    users = [uid for uid, state in user_states.items() if state == UserStates.WAITING_FOR_MESSAGE]
+    users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
     txt = "📬 Активні діалоги:\n\n"
     for uid in users:
         txt += f"• ID: <code>{uid}</code>\n"
@@ -239,7 +266,7 @@ def handle_admin_active_dialogs(message):
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
 def handle_admin_users(message):
-    users = [uid for uid in user_states if uid != config.ADMIN_ID]
+    users = [uid for uid in get_all_user_ids() if uid != config.ADMIN_ID]
     txt = "👥 Список користувачів:\n\n"
     for uid in users:
         txt += f"• ID: <code>{uid}</code>\n"
@@ -247,12 +274,10 @@ def handle_admin_users(message):
         txt += "Немає користувачів."
     bot.send_message(message.chat.id, txt, parse_mode="HTML")
 
-# --- Хендлери для користувачів ---
-
 @bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "🎤 Записати трек")
 def handle_start_recording(message):
     user_id = message.from_user.id
-    user_states[user_id] = UserStates.WAITING_FOR_MESSAGE
+    set_user_state(user_id, UserStates.WAITING_FOR_MESSAGE)
     markup = get_chat_keyboard()
     bot.send_message(
         message.chat.id,
@@ -292,8 +317,7 @@ def handle_show_contacts(message):
 @bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "❌ Завершити діалог")
 def handle_end_dialog(message):
     user_id = message.from_user.id
-    if user_id in user_states:
-        user_states[user_id] = UserStates.IDLE
+    set_user_state(user_id, UserStates.IDLE)
     markup = get_main_keyboard()
     bot.send_message(
         message.chat.id,
@@ -301,7 +325,7 @@ def handle_end_dialog(message):
         reply_markup=markup
     )
 
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == UserStates.WAITING_FOR_MESSAGE)
+@bot.message_handler(func=lambda message: get_user_state(message.from_user.id) == UserStates.WAITING_FOR_MESSAGE)
 def handle_user_message(message):
     is_valid, error_msg = validate_message(message)
     if not is_valid:
@@ -334,16 +358,14 @@ def handle_user_message(message):
     # Підтвердження юзеру
     bot.send_message(message.chat.id, Messages.MESSAGE_SENT)
 
-# ---- АДМІН ВІДПОВІДІ ----
-
 @bot.callback_query_handler(func=lambda call: call.data.startswith('reply_'))
 def handle_admin_reply_callback(call):
     if not is_admin(call.from_user.id):
         bot.answer_callback_query(call.id, "❌ Немає доступу")
         return
     user_id = int(call.data.split('_')[1])
-    admin_replies[config.ADMIN_ID] = user_id
-    user_states[config.ADMIN_ID] = f"{UserStates.ADMIN_REPLYING}_{user_id}"
+    set_admin_reply_target(config.ADMIN_ID, user_id)
+    set_user_state(config.ADMIN_ID, f"{UserStates.ADMIN_REPLYING}_{user_id}")
     bot.answer_callback_query(call.id, "Напишіть відповідь наступним повідомленням")
     bot.send_message(
         config.ADMIN_ID,
@@ -372,9 +394,9 @@ def handle_admin_reply_or_panel(message):
         return
 
     # 2. Якщо адмін у callback-режимі (натиснув "Відповісти")
-    state = user_states.get(admin_id, '')
+    state = get_user_state(admin_id)
     if state and state.startswith(UserStates.ADMIN_REPLYING):
-        target_user_id = admin_replies.get(admin_id)
+        target_user_id = get_admin_reply_target(admin_id)
         if not target_user_id:
             bot.send_message(admin_id, "❌ Помилка: не знайдено користувача для відповіді")
             return
@@ -389,8 +411,8 @@ def handle_admin_reply_or_panel(message):
             f"✅ Відповідь відправлено клієнту (ID: {target_user_id})",
             reply_to_message_id=message.message_id
         )
-        user_states[admin_id] = UserStates.IDLE
-        admin_replies.pop(admin_id, None)
+        set_user_state(admin_id, UserStates.IDLE)
+        clear_admin_reply_target(admin_id)
         return
 
     # 3. Якщо інше — показуємо адмінське меню
@@ -434,7 +456,7 @@ def health_check():
     <p><strong>Uptime:</strong> {uptime_hours}год {uptime_minutes}хв</p>
     <p><strong>Час запуску:</strong> {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))}</p>
     <p><strong>Поточний час:</strong> {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
-    <p><strong>Користувачів:</strong> {len(user_states)}</p>
+    <p><strong>Користувачів:</strong> {len(get_all_user_ids())}</p>
     """
 
 @app.route('/health')
@@ -446,8 +468,8 @@ def health():
             "timestamp": time.time(),
             "uptime_seconds": int(time.time() - bot_start_time),
             "bot_username": bot_info.username,
-            "total_users": len(user_states),
-            "version": "3.0-admin-panel"
+            "total_users": len(get_all_user_ids()),
+            "version": "3.0-admin-panel-redis"
         }), 200
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -464,12 +486,12 @@ def ping():
 @app.route('/status')
 def status():
     try:
-        active_users = len([uid for uid, state in user_states.items() if state == UserStates.WAITING_FOR_MESSAGE])
+        active_users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
         return jsonify({
             "bot_status": "running",
             "uptime_seconds": int(time.time() - bot_start_time),
-            "total_users": len(user_states),
-            "active_chats": active_users,
+            "total_users": len(get_all_user_ids()),
+            "active_chats": len(active_users),
             "admin_id": config.ADMIN_ID,
             "timestamp": time.time()
         })
@@ -502,8 +524,8 @@ def self_ping():
     url = f"http://localhost:{port}/keepalive"
     while True:
         try:
-            r = requests.get(url, timeout=10)
-            print(f"[SELF-PING] Pinged {url} ({r.status_code})")
+            r2 = requests.get(url, timeout=10)
+            print(f"[SELF-PING] Pinged {url} ({r2.status_code})")
         except Exception as e:
             print(f"[SELF-PING] Error pinging {url}: {e}")
         time.sleep(300)  # 5 хвилин
