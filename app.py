@@ -115,6 +115,15 @@ def safe_send(chat_id, text, **kwargs):
     except Exception as e:
         logger.error(f"Telegram send_message error: {e}", exc_info=True)
 
+# -------- MARKDOWN ESCAPE --------
+try:
+    from telebot.util import escape_markdown
+except ImportError:
+    def escape_markdown(text):
+        for c in ('_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'):
+            text = text.replace(c, f'\\{c}')
+        return text
+
 # -------- SETUP --------
 config = BotConfig()
 bot = telebot.TeleBot(config.TOKEN)
@@ -248,7 +257,7 @@ def clear_admin_reply_target(admin_id: int):
 def send_user_request_to_admin(user_id, text):
     try:
         logger.info(f"User request sent to admin: user_id={user_id}, text={text[:60]}")
-        safe_send(config.ADMIN_ID, f"Нова заявка від користувача {user_id}:\n{text}")
+        safe_send(config.ADMIN_ID, f"Нова заявка від користувача {user_id}:\n{html.escape(text)}")
     except Exception as e:
         logger.error(f"Failed to send user request to admin: {e}", exc_info=True)
 
@@ -295,7 +304,7 @@ def handle_start(message):
     logger.info(f"User started: id={message.from_user.id}, name={message.from_user.first_name} @{message.from_user.username}")
     safe_send(
         message.chat.id,
-        Messages.WELCOME.format(message.from_user.first_name),
+        Messages.WELCOME.format(html.escape(message.from_user.first_name)),
         reply_markup=get_main_keyboard()
     )
 
@@ -366,7 +375,7 @@ def admin_reply_to_selected_user(message):
     try:
         incr_stat("admin_replies")
         logger.info(f"Admin {admin_id} replies to user {user_id}: {message.text[:60]}")
-        safe_send(user_id, Messages.ADMIN_REPLY.format(message.text), parse_mode='Markdown')
+        safe_send(user_id, Messages.ADMIN_REPLY.format(escape_markdown(message.text)), parse_mode='Markdown')
         safe_send(admin_id, "✅ Відповідь відправлено користувачу.")
     except Exception as e:
         logger.error(f"Error sending reply from admin to user: {e}", exc_info=True)
@@ -413,7 +422,7 @@ def admin_broadcast_process(message):
     errors = 0
     for i, uid in enumerate(users, start=1):
         try:
-            bot.send_message(uid, f"📢 <b>Оголошення:</b>\n\n{text}", parse_mode="HTML")
+            bot.send_message(uid, f"📢 <b>Оголошення:</b>\n\n{html.escape(text)}", parse_mode="HTML")
             delivered += 1
         except Exception as e:
             errors += 1
