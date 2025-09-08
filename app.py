@@ -12,6 +12,16 @@ from flask import Flask, jsonify
 
 import requests  # for self-ping
 
+# -------- ЛОГУВАННЯ --------
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(levelname)s][%(asctime)s] %(message)s',
+    datefmt='%H:%M:%S',
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+logging.getLogger('TeleBot').setLevel(logging.WARNING)
+
 # -------- CONFIG --------
 @dataclass
 class BotConfig:
@@ -21,7 +31,7 @@ class BotConfig:
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
     WEBHOOK_PORT: int = int(os.getenv('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
-    RATE_LIMIT_MESSAGES: int = 5  # messages per minute
+    RATE_LIMIT_MESSAGES: int = 5  # повідомлень на хвилину
 
 # -------- TEXTS --------
 class Messages:
@@ -65,7 +75,7 @@ _Ви можете відправити додаткові повідомлен�
     USE_MENU_BUTTONS = "🤔 Використовуйте кнопки меню для навігації"
     ERROR_SEND_FAILED = "❌ Помилка при відправці повідомлення. Спробуйте пізніше."
     ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {BotConfig.MAX_MESSAGE_LENGTH} символів."
-    ERROR_RATE_LIMITED = "❌ Забагато повідомлень. Зачекайте хвилинку."
+    ERROR_RATE_LIMITED = "❌ Забагато повідомлень. Зачекайте хвилину."
     ERROR_INVALID_INPUT = "❌ Некоректне повідомлення. Спробуйте ще раз."
 
 # -------- STATES --------
@@ -74,22 +84,14 @@ class UserStates:
     WAITING_FOR_MESSAGE = 'waiting_for_message'
     ADMIN_REPLYING = 'admin_replying'
 
-# -------- LOGGING --------
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
-
 # -------- SETUP --------
 config = BotConfig()
 bot = telebot.TeleBot(config.TOKEN)
 try:
     bot_info = bot.get_me()
-    logger.info(f"Bot token is valid! Bot name: {bot_info.first_name} (@{bot_info.username})")
+    logger.info(f"Бот підключено як: {bot_info.first_name} (@{bot_info.username})")
 except Exception as token_error:
-    logger.error(f"Invalid bot token: {token_error}")
+    logger.error(f"❌ Некоректний токен бота: {token_error}")
     exit(1)
 
 user_states = {}       # user_id: state
@@ -171,6 +173,7 @@ def handle_start(message):
     user_info = get_user_info(message.from_user)
     if is_admin(message.from_user.id):
         markup = get_admin_keyboard()
+        logger.info(f"Адмін {user_info['id']} відкрив адмін-панель.")
         bot.send_message(
             message.chat.id,
             "👨‍💼 Ви у панелі адміністратора. Оберіть дію:",
@@ -179,14 +182,14 @@ def handle_start(message):
     else:
         markup = get_main_keyboard()
         user_states[message.from_user.id] = UserStates.IDLE
+        logger.info(f"Користувач {user_info['id']} стартував бота.")
         bot.send_message(
             message.chat.id,
             Messages.WELCOME.format(user_info['first_name']),
             reply_markup=markup
         )
 
-# --- Хендлери для адмінських кнопок (мають бути вище catch-all!) ---
-
+# --- Адмінські кнопки ---
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
 def handle_admin_broadcast(message):
     bot.send_message(message.chat.id, "✍️ Відправте текст розсилки. Всі користувачі отримають це повідомлення.")
@@ -199,8 +202,8 @@ def handle_admin_broadcast(message):
                 try:
                     bot.send_message(uid, f"📢 [Розсилка]\n\n{txt}")
                     count += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Не вдалося відправити розсилку користувачу {uid}: {e}")
         bot.send_message(config.ADMIN_ID, f"✅ Розсилку відправлено {count} користувачам.")
 
     bot.register_next_step_handler(message, broadcast_handler)
@@ -247,8 +250,7 @@ def handle_admin_users(message):
         txt += "Немає користувачів."
     bot.send_message(message.chat.id, txt, parse_mode="HTML")
 
-# --- Хендлери для користувачів ---
-
+# --- Користувацькі кнопки ---
 @bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "🎤 Записати трек")
 def handle_start_recording(message):
     user_id = message.from_user.id
@@ -322,16 +324,13 @@ def handle_user_message(message):
         "✍️ Відповісти",
         callback_data=f"reply_{user_info['id']}"
     ))
-    # Надсилаємо адміну текст з кнопкою
     bot.send_message(
         config.ADMIN_ID,
         admin_text,
         parse_mode='Markdown',
         reply_markup=markup
     )
-    # Надсилаємо адміну forward для reply-режиму
     bot.forward_message(config.ADMIN_ID, message.chat.id, message.message_id)
-    # Підтвердження юзеру
     bot.send_message(message.chat.id, Messages.MESSAGE_SENT)
 
 # ---- АДМІН ВІДПОВІДІ ----
@@ -355,7 +354,6 @@ def handle_admin_reply_callback(call):
 def handle_admin_reply_or_panel(message):
     admin_id = message.from_user.id
 
-    # 1. Якщо reply на forward-повідомлення (адмін просто відповідає у Telegram)
     if message.reply_to_message and message.reply_to_message.forward_from:
         user_id = message.reply_to_message.forward_from.id
         sanitized_reply = sanitize_input(message.text)
@@ -371,7 +369,6 @@ def handle_admin_reply_or_panel(message):
         )
         return
 
-    # 2. Якщо адмін у callback-режимі (натиснув "Відповісти")
     state = user_states.get(admin_id, '')
     if state and state.startswith(UserStates.ADMIN_REPLYING):
         target_user_id = admin_replies.get(admin_id)
@@ -393,7 +390,6 @@ def handle_admin_reply_or_panel(message):
         admin_replies.pop(admin_id, None)
         return
 
-    # 3. Якщо інше — показуємо адмінське меню
     markup = get_admin_keyboard()
     bot.send_message(
         admin_id,
@@ -431,7 +427,7 @@ def health_check():
     return f"""
     <h1>🎵 Kuznya Music Studio Bot</h1>
     <p><strong>Статус:</strong> ✅ Активний</p>
-    <p><strong>Uptime:</strong> {uptime_hours}год {uptime_minutes}хв</p>
+    <p><strong>Uptime:</strong> {uptime_hours} год {uptime_minutes} хв</p>
     <p><strong>Час запуску:</strong> {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))}</p>
     <p><strong>Поточний час:</strong> {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
     <p><strong>Користувачів:</strong> {len(user_states)}</p>
@@ -503,27 +499,26 @@ def self_ping():
     while True:
         try:
             r = requests.get(url, timeout=10)
-            print(f"[SELF-PING] Pinged {url} ({r.status_code})")
+            logger.debug(f"[SELF-PING] Pinged {url} ({r.status_code})")
         except Exception as e:
-            print(f"[SELF-PING] Error pinging {url}: {e}")
+            logger.debug(f"[SELF-PING] Error pinging {url}: {e}")
         time.sleep(300)  # 5 хвилин
 
 if __name__ == "__main__":
     try:
-        logger.info("Starting Kuznya Music Studio Bot...")
+        logger.info("Запуск Kuznya Music Studio Bot...")
         flask_thread = Thread(target=run_flask, daemon=True)
         flask_thread.start()
         selfping_thread = Thread(target=self_ping, daemon=True)
         selfping_thread.start()
-        logger.info("🎵 Music Studio Bot started successfully!")
-        logger.info(f"Admin ID: {config.ADMIN_ID}")
-        logger.info("Bot is polling for messages...")
+        logger.info("🎵 Бот запущено!")
+        logger.info(f"ID адміністратора: {config.ADMIN_ID}")
         while True:
             try:
                 bot.polling(none_stop=True, interval=1, timeout=30)
             except telebot.apihelper.ApiTelegramException as api_error:
                 if "409" in str(api_error) or "Conflict" in str(api_error):
-                    logger.warning("Conflict detected - another bot instance running. Retrying in 10 seconds...")
+                    logger.warning("Конфлікт: інший екземпляр бота вже працює. Перезапуск через 10 секунд...")
                     time.sleep(10)
                     try:
                         bot.stop_polling()
@@ -535,13 +530,13 @@ if __name__ == "__main__":
                 else:
                     raise api_error
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        logger.info("Бот зупинено користувачем")
         try:
             bot.stop_polling()
         except:
             pass
     except Exception as e:
-        logger.critical(f"Critical error: {e}")
+        logger.critical(f"Критична помилка: {e}")
         try:
             bot.stop_polling()
         except:
