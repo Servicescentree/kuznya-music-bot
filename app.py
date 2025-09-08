@@ -196,10 +196,257 @@ def get_admin_reply_target(admin_id: int) -> int:
 def clear_admin_reply_target(admin_id: int):
     r.delete(f"admin:{admin_id}:reply")
 
-# -------- HANDLERS (same as in your code, not repeated for brevity) --------
-# ... (Всі твої message_handler-и тут, без змін)
+# -------- HANDLERS --------
 
-# --- catch-all останнім! ---
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    user_info = get_user_info(message.from_user)
+    if is_admin(message.from_user.id):
+        markup = get_admin_keyboard()
+        bot.send_message(
+            message.chat.id,
+            "👨‍💼 Ви у панелі адміністратора. Оберіть дію:",
+            reply_markup=markup
+        )
+        return
+    else:
+        markup = get_main_keyboard()
+        add_user(message.from_user.id)
+        bot.send_message(
+            message.chat.id,
+            Messages.WELCOME.format(user_info['first_name']),
+            reply_markup=markup
+        )
+        return
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
+def handle_admin_broadcast(message):
+    bot.send_message(message.chat.id, "✍️ Відправте текст розсилки. Всі користувачі отримають це повідомлення.")
+
+    def broadcast_handler(msg):
+        txt = msg.text
+        count = 0
+        for uid in get_all_user_ids():
+            if uid != config.ADMIN_ID:
+                try:
+                    bot.send_message(uid, f"📢 [Розсилка]\n\n{txt}")
+                    count += 1
+                except Exception:
+                    pass
+        bot.send_message(config.ADMIN_ID, f"✅ Розсилку відправлено {count} користувачам.")
+
+    bot.register_next_step_handler(message, broadcast_handler)
+    return
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
+def handle_show_stats(message):
+    all_users = get_all_user_ids()
+    active_users = [uid for uid in all_users if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
+    total_users = len(all_users)
+    recent_users = 0
+    now = time.time()
+    for uid in all_users:
+        key = f"rate:{uid}"
+        if r.ttl(key) > 0:
+            recent_users += 1
+    stats_text = f"""📊 *Детальна статистика*
+
+👥 Всього користувачів: {total_users}
+💬 Активних чатів: {len(active_users)}
+⏰ Активних за годину: {recent_users}
+📅 Дата: {time.strftime('%d.%m.%Y %H:%M')}
+
+🔧 Технічна інформація:
+• Зберігання: Upstash Redis
+• Логування: активне
+• Рейт-лімітинг: {config.RATE_LIMIT_MESSAGES} повідомлень/хвилину"""
+    bot.send_message(
+        message.chat.id,
+        stats_text,
+        parse_mode='Markdown'
+    )
+    return
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
+def handle_admin_active_dialogs(message):
+    users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
+    txt = "📬 Активні діалоги:\n\n"
+    for uid in users:
+        txt += f"• ID: <code>{uid}</code>\n"
+    if not users:
+        txt += "Немає активних діалогів."
+    bot.send_message(message.chat.id, txt, parse_mode="HTML")
+    return
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
+def handle_admin_users(message):
+    users = [uid for uid in get_all_user_ids() if uid != config.ADMIN_ID]
+    txt = "👥 Список користувачів:\n\n"
+    for uid in users:
+        txt += f"• ID: <code>{uid}</code>\n"
+    if not users:
+        txt += "Немає користувачів."
+    bot.send_message(message.chat.id, txt, parse_mode="HTML")
+    return
+
+@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "🎤 Записати трек")
+def handle_start_recording(message):
+    user_id = message.from_user.id
+    set_user_state(user_id, UserStates.WAITING_FOR_MESSAGE)
+    markup = get_chat_keyboard()
+    bot.send_message(
+        message.chat.id,
+        Messages.RECORDING_PROMPT,
+        parse_mode='Markdown',
+        reply_markup=markup
+    )
+    return
+
+@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "🎧 Приклади робіт")
+def handle_show_examples(message):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton(
+        "До прикладів 🎧",
+        url=config.EXAMPLES_URL
+    ))
+    bot.send_message(
+        message.chat.id,
+        "🎵 Наші роботи:\n\nПриклади: Аранжування 🎹 | Зведення 🎧 | Мастерингу 🔊",
+        reply_markup=markup
+    )
+    return
+
+@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "📢 Підписатися")
+def handle_show_channel(message):
+    bot.send_message(
+        message.chat.id,
+        Messages.CHANNEL_INFO.format(config.CHANNEL_URL),
+        disable_web_page_preview=False
+    )
+    return
+
+@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "📲 Контакти")
+def handle_show_contacts(message):
+    bot.send_message(
+        message.chat.id,
+        Messages.CONTACTS_INFO
+    )
+    return
+
+@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "❌ Завершити діалог")
+def handle_end_dialog(message):
+    user_id = message.from_user.id
+    set_user_state(user_id, UserStates.IDLE)
+    markup = get_main_keyboard()
+    bot.send_message(
+        message.chat.id,
+        Messages.DIALOG_ENDED,
+        reply_markup=markup
+    )
+    return
+
+@bot.message_handler(func=lambda message: get_user_state(message.from_user.id) == UserStates.WAITING_FOR_MESSAGE)
+def handle_user_message(message):
+    is_valid, error_msg = validate_message(message)
+    if not is_valid:
+        bot.send_message(message.chat.id, error_msg)
+        return
+    user_info = get_user_info(message.from_user)
+    sanitized_text = sanitize_input(message.text)
+    admin_text = f"""💬 *Нове повідомлення від клієнта*
+
+👤 *Клієнт:* {user_info['full_name']} (@{user_info['username']})
+🆔 *ID:* `{user_info['id']}`
+⏰ *Час:* {time.strftime('%H:%M %d.%m.%Y')}
+
+📝 *Повідомлення:*
+{sanitized_text}"""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton(
+        "✍️ Відповісти",
+        callback_data=f"reply_{user_info['id']}"
+    ))
+    # Надсилаємо адміну текст з кнопкою
+    bot.send_message(
+        config.ADMIN_ID,
+        admin_text,
+        parse_mode='Markdown',
+        reply_markup=markup
+    )
+    # Надсилаємо адміну forward для reply-режиму
+    bot.forward_message(config.ADMIN_ID, message.chat.id, message.message_id)
+    # Підтвердження юзеру
+    bot.send_message(message.chat.id, Messages.MESSAGE_SENT)
+    return
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('reply_'))
+def handle_admin_reply_callback(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ Немає доступу")
+        return
+    user_id = int(call.data.split('_')[1])
+    set_admin_reply_target(config.ADMIN_ID, user_id)
+    set_user_state(config.ADMIN_ID, f"{UserStates.ADMIN_REPLYING}_{user_id}")
+    bot.answer_callback_query(call.id, "Напишіть відповідь наступним повідомленням")
+    bot.send_message(
+        config.ADMIN_ID,
+        f"✍️ Напишіть відповідь клієнту (ID: {user_id}):\n\n"
+        "_Наступне повідомлення буде відправлено клієнту_"
+    )
+    return
+
+@bot.message_handler(func=lambda message: is_admin(message.from_user.id))
+def handle_admin_reply_or_panel(message):
+    admin_id = message.from_user.id
+
+    # 1. Якщо reply на forward-повідомлення (адмін просто відповідає у Telegram)
+    if message.reply_to_message and message.reply_to_message.forward_from:
+        user_id = message.reply_to_message.forward_from.id
+        sanitized_reply = sanitize_input(message.text)
+        bot.send_message(
+            user_id,
+            Messages.ADMIN_REPLY.format(sanitized_reply),
+            parse_mode='Markdown'
+        )
+        bot.send_message(
+            admin_id,
+            f"✅ Відповідь відправлено клієнту (ID: {user_id})",
+            reply_to_message_id=message.message_id
+        )
+        return
+
+    # 2. Якщо адмін у callback-режимі (натиснув "Відповісти")
+    state = get_user_state(admin_id)
+    if state and state.startswith(UserStates.ADMIN_REPLYING):
+        target_user_id = get_admin_reply_target(admin_id)
+        if not target_user_id:
+            bot.send_message(admin_id, "❌ Помилка: не знайдено користувача для відповіді")
+            return
+        sanitized_reply = sanitize_input(message.text)
+        bot.send_message(
+            target_user_id,
+            Messages.ADMIN_REPLY.format(sanitized_reply),
+            parse_mode='Markdown'
+        )
+        bot.send_message(
+            admin_id,
+            f"✅ Відповідь відправлено клієнту (ID: {target_user_id})",
+            reply_to_message_id=message.message_id
+        )
+        set_user_state(admin_id, UserStates.IDLE)
+        clear_admin_reply_target(admin_id)
+        return
+
+    # 3. Якщо інше — показуємо адмінське меню
+    markup = get_admin_keyboard()
+    bot.send_message(
+        admin_id,
+        Messages.USE_MENU_BUTTONS,
+        reply_markup=markup
+    )
+    return
+
+# -------- КІНЕЦЬ: CATCH-ALL HANDLER --------
 @bot.message_handler(func=lambda message: True)
 def handle_other_messages(message):
     if is_admin(message.from_user.id):
