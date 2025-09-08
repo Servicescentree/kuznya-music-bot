@@ -11,12 +11,11 @@ from telebot import types
 from flask import Flask, jsonify
 
 import requests  # for self-ping
-import redis     # NEW: for Redis
+import redis     # for Redis
 
 # -------- CONFIG --------
 @dataclass
 class BotConfig:
-    # ЗАБОРОНЕНО дефолтні токени! Тільки через змінні оточення
     TOKEN: str = os.getenv('BOT_TOKEN')
     ADMIN_ID: int = int(os.getenv('ADMIN_ID') or 0)
     CHANNEL_URL: str = 'https://t.me/kuznya_music'
@@ -24,17 +23,23 @@ class BotConfig:
     WEBHOOK_PORT: int = int(os.getenv('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
     RATE_LIMIT_MESSAGES: int = 5  # messages per minute
+    REDIS_URL: str = os.getenv('REDIS_URL')
 
-    # Додаємо Redis URL (наприклад, upstash)
-    REDIS_URL: str = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-
-# -------- REDIS INIT --------
 config = BotConfig()
 
 if not config.TOKEN or not config.ADMIN_ID:
     raise ValueError("❌ Set BOT_TOKEN and ADMIN_ID as environment variables! Bot will not run.")
+if not config.REDIS_URL:
+    raise ValueError("❌ Set REDIS_URL as environment variable! Bot will not run.")
 
-r = redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+# -------- REDIS INIT --------
+try:
+    r = redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+    r.ping()
+    print("✅ Redis connection OK!")
+except Exception as e:
+    print(f"❌ Redis connection ERROR: {e}")
+    raise
 
 # -------- TEXTS --------
 class Messages:
@@ -77,7 +82,7 @@ _Ви можете відправити додаткові повідомлен�
     ADMIN_REPLY = "💬 *Відповідь від адміністратора:*\n\n{}"
     USE_MENU_BUTTONS = "🤔 Використовуйте кнопки меню для навігації"
     ERROR_SEND_FAILED = "❌ Помилка при відправці повідомлення. Спробуйте пізніше."
-    ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {BotConfig.MAX_MESSAGE_LENGTH} символів."
+    ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {config.MAX_MESSAGE_LENGTH} символів."
     ERROR_RATE_LIMITED = "❌ Забагато повідомлень. Зачекайте хвилинку."
     ERROR_INVALID_INPUT = "❌ Некоректне повідомлення. Спробуйте ще раз."
     BROADCAST_PENDING = "⚠️ Зараз очікується текст розсилки. Завершіть поточну розсилку перед запуском нової."
