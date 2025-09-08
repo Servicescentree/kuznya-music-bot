@@ -313,7 +313,8 @@ def handle_user_message(message):
             parse_mode='Markdown',
             reply_markup=markup
         )
-        bot.send_message(message.chat.id, Messages.MESSAGE_SENT)
+        # Підтвердження користувачу
+        bot.send_message(message.chat.id, "✅ Ваше повідомлення надіслано адміністратору!")
         logger.info(f"Message forwarded from user {user_info['id']} to admin")
     except telebot.apihelper.ApiException as e:
         logger.error(f"Telegram API error in handle_user_message: {e}")
@@ -355,9 +356,10 @@ def handle_admin_reply(message):
             Messages.ADMIN_REPLY.format(sanitized_reply),
             parse_mode='Markdown'
         )
+        # Підтвердження адміну
         bot.send_message(
             config.ADMIN_ID,
-            f"✅ Відповідь відправлено клієнту (ID: {target_user_id})"
+            "✅ Ваше повідомлення надіслано користувачу!"
         )
         MemoryManager.set_user_state(config.ADMIN_ID, UserStates.IDLE)
         admin_replies.pop(config.ADMIN_ID, None)
