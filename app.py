@@ -22,14 +22,14 @@ r = redis.from_url(REDIS_URL, decode_responses=True)
 # -------- CONFIG --------
 @dataclass
 class BotConfig:
-    TOKEN: str = os.getenv('BOT_TOKEN', '')
-    ADMIN_ID: int = int(os.getenv('ADMIN_ID', '0'))
+    TOKEN: str = os.environ['BOT_TOKEN']
+    ADMIN_ID: int = int(os.environ['ADMIN_ID'])
     CHANNEL_URL: str = 'https://t.me/kuznya_music'
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
-    WEBHOOK_PORT: int = int(os.getenv('PORT', 8080))
+    WEBHOOK_PORT: int = int(os.environ.get('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
-    RATE_LIMIT_MESSAGES: int = 5  # messages per minute
-    WEBHOOK_URL: str = os.getenv('WEBHOOK_URL', '')  # e.g. https://your-app.onrender.com
+    RATE_LIMIT_MESSAGES: int = 5
+    WEBHOOK_URL: str = os.environ['WEBHOOK_URL']
 
 # -------- TEXTS --------
 class Messages:
@@ -82,23 +82,41 @@ class UserStates:
     WAITING_FOR_MESSAGE = 'waiting_for_message'
     ADMIN_REPLYING = 'admin_replying'
 
+# --- Для розсилки ---
+BROADCAST_STATE = 'waiting_for_broadcast_message'
+
 # -------- LOGGING --------
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("bot_errors.log", encoding="utf-8")
+    ]
 )
 logger = logging.getLogger(__name__)
 
+# -------- ERROR HANDLING DECORATOR --------
+def safe_handler(func):
+    def wrapper(message, *args, **kwargs):
+        try:
+            return func(message, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"Handler error in {func.__name__}: {e}", exc_info=True)
+            try:
+                bot.send_message(message.chat.id, "❌ Виникла технічна помилка, спробуйте ще раз або пізніше.")
+            except Exception:
+                pass
+    return wrapper
+
+def safe_send(chat_id, text, **kwargs):
+    try:
+        bot.send_message(chat_id, text, **kwargs)
+    except Exception as e:
+        logger.error(f"Telegram send_message error: {e}", exc_info=True)
+
 # -------- SETUP --------
 config = BotConfig()
-if not config.TOKEN or not config.TOKEN.startswith(""):
-    raise ValueError("BOT_TOKEN is not set!")
-if not config.ADMIN_ID:
-    raise ValueError("ADMIN_ID is not set!")
-if not config.WEBHOOK_URL:
-    raise ValueError("WEBHOOK_URL is not set!")
-
 bot = telebot.TeleBot(config.TOKEN)
 try:
     bot_info = bot.get_me()
@@ -106,6 +124,7 @@ try:
 except Exception as token_error:
     logger.error(f"Invalid bot token: {token_error}")
     exit(1)
+logger.info("Bot started (main entrypoint).")
 
 # -------- UTILS --------
 def is_admin(user_id: int) -> bool:
@@ -160,305 +179,246 @@ def validate_message(message) -> tuple[bool, str]:
 
 def check_rate_limit(user_id: int) -> bool:
     key = f"rate:{user_id}"
-    pipe = r.pipeline()
-    pipe.incr(key)
-    pipe.expire(key, 60)
-    count, _ = pipe.execute()
-    return count <= config.RATE_LIMIT_MESSAGES
+    try:
+        pipe = r.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, 60)
+        count, _ = pipe.execute()
+        return count <= config.RATE_LIMIT_MESSAGES
+    except Exception as e:
+        logger.error(f"Redis error in check_rate_limit: {e}", exc_info=True)
+        return True  # fail-open
 
 def sanitize_input(text: str) -> str:
     return html.escape(text.strip())
 
 def set_user_state(user_id: int, state: str):
-    r.set(f"user:{user_id}:state", state)
+    try:
+        r.set(f"user:{user_id}:state", state)
+    except Exception as e:
+        logger.error(f"Redis error in set_user_state: {e}", exc_info=True)
 
 def get_user_state(user_id: int) -> str:
-    return r.get(f"user:{user_id}:state") or UserStates.IDLE
+    try:
+        return r.get(f"user:{user_id}:state") or UserStates.IDLE
+    except Exception as e:
+        logger.error(f"Redis error in get_user_state: {e}", exc_info=True)
+        return UserStates.IDLE
 
 def get_all_user_ids():
     ids = []
-    for key in r.scan_iter("user:*:state"):
-        uid = key.split(":")[1]
-        if uid not in ids:
-            ids.append(int(uid))
+    try:
+        for key in r.scan_iter("user:*:state"):
+            uid = key.split(":")[1]
+            if uid not in ids:
+                ids.append(int(uid))
+    except Exception as e:
+        logger.error(f"Redis error in get_all_user_ids: {e}", exc_info=True)
     return ids
 
-def add_user(user_id: int):
-    set_user_state(user_id, UserStates.IDLE)
+def add_user(user_id: int, user=None):
+    try:
+        set_user_state(user_id, UserStates.IDLE)
+        if user:
+            info = f"{user.first_name or ''} {user.last_name or ''} @{user.username or ''}".strip()
+            r.set(f"user:{user_id}:info", info)
+    except Exception as e:
+        logger.error(f"Redis error in add_user: {e}", exc_info=True)
 
 def set_admin_reply_target(admin_id: int, user_id: int):
-    r.set(f"admin:{admin_id}:reply", user_id)
+    try:
+        r.set(f"admin:{admin_id}:reply", user_id)
+    except Exception as e:
+        logger.error(f"Redis error in set_admin_reply_target: {e}", exc_info=True)
 
 def get_admin_reply_target(admin_id: int) -> int:
-    uid = r.get(f"admin:{admin_id}:reply")
-    return int(uid) if uid else None
+    try:
+        uid = r.get(f"admin:{admin_id}:reply")
+        return int(uid) if uid else None
+    except Exception as e:
+        logger.error(f"Redis error in get_admin_reply_target: {e}", exc_info=True)
+        return None
 
 def clear_admin_reply_target(admin_id: int):
-    r.delete(f"admin:{admin_id}:reply")
+    try:
+        r.delete(f"admin:{admin_id}:reply")
+    except Exception as e:
+        logger.error(f"Redis error in clear_admin_reply_target: {e}", exc_info=True)
+
+def send_user_request_to_admin(user_id, text):
+    try:
+        logger.info(f"User request sent to admin: user_id={user_id}, text={text[:60]}")
+        safe_send(config.ADMIN_ID, f"Нова заявка від користувача {user_id}:\n{text}")
+    except Exception as e:
+        logger.error(f"Failed to send user request to admin: {e}", exc_info=True)
+
+# ------- Статистика -------
+def incr_stat(key):
+    try:
+        r.incr(f"stat:{key}")
+    except Exception as e:
+        logger.error(f"Redis error in incr_stat: {e}", exc_info=True)
+
+def get_stat(key):
+    try:
+        return int(r.get(f"stat:{key}") or 0)
+    except Exception as e:
+        logger.error(f"Redis error in get_stat: {e}", exc_info=True)
+        return 0
+
+# ------- Broadcast state for admin -------
+def set_admin_state(user_id, state):
+    try:
+        r.set(f"admin:{user_id}:state", state)
+    except Exception as e:
+        logger.error(f"Redis error in set_admin_state: {e}", exc_info=True)
+
+def get_admin_state(user_id):
+    try:
+        return r.get(f"admin:{user_id}:state") or ""
+    except Exception as e:
+        logger.error(f"Redis error in get_admin_state: {e}", exc_info=True)
+        return ""
+
+def clear_admin_state(user_id):
+    try:
+        r.delete(f"admin:{user_id}:state")
+    except Exception as e:
+        logger.error(f"Redis error in clear_admin_state: {e}", exc_info=True)
 
 # -------- HANDLERS --------
 
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=["start"])
+@safe_handler
 def handle_start(message):
-    user_info = get_user_info(message.from_user)
-    if is_admin(message.from_user.id):
-        markup = get_admin_keyboard()
-        bot.send_message(
-            message.chat.id,
-            "👨‍💼 Ви у панелі адміністратора. Оберіть дію:",
-            reply_markup=markup
-        )
-        return
-    else:
-        markup = get_main_keyboard()
-        add_user(message.from_user.id)
-        bot.send_message(
-            message.chat.id,
-            Messages.WELCOME.format(user_info['first_name']),
-            reply_markup=markup
-        )
-        return
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
-def handle_admin_broadcast(message):
-    bot.send_message(message.chat.id, "✍️ Відправте текст розсилки. Всі користувачі отримають це повідомлення.")
-
-    def broadcast_handler(msg):
-        txt = msg.text
-        count = 0
-        for uid in get_all_user_ids():
-            if uid != config.ADMIN_ID:
-                try:
-                    bot.send_message(uid, f"📢 [Розсилка]\n\n{txt}")
-                    count += 1
-                except Exception:
-                    pass
-        bot.send_message(config.ADMIN_ID, f"✅ Розсилку відправлено {count} користувачам.")
-
-    bot.register_next_step_handler(message, broadcast_handler)
-    return
-
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
-def handle_show_stats(message):
-    all_users = get_all_user_ids()
-    active_users = [uid for uid in all_users if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
-    total_users = len(all_users)
-    recent_users = 0
-    now = time.time()
-    for uid in all_users:
-        key = f"rate:{uid}"
-        if r.ttl(key) > 0:
-            recent_users += 1
-    stats_text = f"""📊 *Детальна статистика*
-
-👥 Всього користувачів: {total_users}
-💬 Активних чатів: {len(active_users)}
-⏰ Активних за годину: {recent_users}
-📅 Дата: {time.strftime('%d.%m.%Y %H:%M')}
-
-🔧 Технічна інформація:
-• Зберігання: Upstash Redis
-• Логування: активне
-• Рейт-лімітинг: {config.RATE_LIMIT_MESSAGES} повідомлень/хвилину"""
-    bot.send_message(
+    add_user(message.from_user.id, message.from_user)
+    logger.info(f"User started: id={message.from_user.id}, name={message.from_user.first_name} @{message.from_user.username}")
+    safe_send(
         message.chat.id,
-        stats_text,
-        parse_mode='Markdown'
+        Messages.WELCOME.format(message.from_user.first_name),
+        reply_markup=get_main_keyboard()
     )
-    return
 
-@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
-def handle_admin_active_dialogs(message):
-    users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
-    txt = "📬 Активні діалоги:\n\n"
-    for uid in users:
-        txt += f"• ID: <code>{uid}</code>\n"
-    if not users:
-        txt += "Немає активних діалогів."
-    bot.send_message(message.chat.id, txt, parse_mode="HTML")
-    return
+# Користувач надсилає заявку (приклад для хендлера заявки)
+@bot.message_handler(func=lambda m: m.text and m.text.lower().startswith("запис"))
+@safe_handler
+def handle_user_request(message):
+    incr_stat("user_requests")
+    send_user_request_to_admin(message.from_user.id, message.text)
+    safe_send(message.chat.id, Messages.MESSAGE_SENT)
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
-def handle_admin_users(message):
-    users = [uid for uid in get_all_user_ids() if uid != config.ADMIN_ID]
-    txt = "👥 Список користувачів:\n\n"
-    for uid in users:
-        txt += f"• ID: <code>{uid}</code>\n"
-    if not users:
-        txt += "Немає користувачів."
-    bot.send_message(message.chat.id, txt, parse_mode="HTML")
-    return
-
-@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "🎤 Записати трек")
-def handle_start_recording(message):
-    user_id = message.from_user.id
-    set_user_state(user_id, UserStates.WAITING_FOR_MESSAGE)
-    markup = get_chat_keyboard()
-    bot.send_message(
-        message.chat.id,
-        Messages.RECORDING_PROMPT,
-        parse_mode='Markdown',
-        reply_markup=markup
-    )
-    return
-
-@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "🎧 Приклади робіт")
-def handle_show_examples(message):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton(
-        "До прикладів 🎧",
-        url=config.EXAMPLES_URL
-    ))
-    bot.send_message(
-        message.chat.id,
-        "🎵 Наші роботи:\n\nПриклади: Аранжування 🎹 | Зведення 🎧 | Мастерингу 🔊",
-        reply_markup=markup
-    )
-    return
-
-@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "📢 Підписатися")
-def handle_show_channel(message):
-    bot.send_message(
-        message.chat.id,
-        Messages.CHANNEL_INFO.format(config.CHANNEL_URL),
-        disable_web_page_preview=False
-    )
-    return
-
-@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "📲 Контакти")
-def handle_show_contacts(message):
-    bot.send_message(
-        message.chat.id,
-        Messages.CONTACTS_INFO
-    )
-    return
-
-@bot.message_handler(func=lambda message: not is_admin(message.from_user.id) and message.text == "❌ Завершити діалог")
-def handle_end_dialog(message):
-    user_id = message.from_user.id
-    set_user_state(user_id, UserStates.IDLE)
-    markup = get_main_keyboard()
-    bot.send_message(
-        message.chat.id,
-        Messages.DIALOG_ENDED,
-        reply_markup=markup
-    )
-    return
-
-@bot.message_handler(func=lambda message: get_user_state(message.from_user.id) == UserStates.WAITING_FOR_MESSAGE)
-def handle_user_message(message):
-    is_valid, error_msg = validate_message(message)
-    if not is_valid:
-        bot.send_message(message.chat.id, error_msg)
+@safe_handler
+def admin_show_users(message):
+    user_ids = get_all_user_ids()
+    if not user_ids:
+        safe_send(message.chat.id, "Немає користувачів.")
         return
-    user_info = get_user_info(message.from_user)
-    sanitized_text = sanitize_input(message.text)
-    admin_text = f"""💬 *Нове повідомлення від клієнта*
-
-👤 *Клієнт:* {user_info['full_name']} (@{user_info['username']})
-🆔 *ID:* `{user_info['id']}`
-⏰ *Час:* {time.strftime('%H:%M %d.%m.%Y')}
-
-📝 *Повідомлення:*
-{sanitized_text}"""
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton(
-        "✍️ Відповісти",
-        callback_data=f"reply_{user_info['id']}"
-    ))
-    # Надсилаємо адміну текст з кнопкою
-    bot.send_message(
-        config.ADMIN_ID,
-        admin_text,
-        parse_mode='Markdown',
-        reply_markup=markup
-    )
-    # Надсилаємо адміну forward для reply-режиму
-    bot.forward_message(config.ADMIN_ID, message.chat.id, message.message_id)
-    # Підтвердження юзеру
-    bot.send_message(message.chat.id, Messages.MESSAGE_SENT)
-    return
+    for uid in user_ids:
+        try:
+            info = r.get(f"user:{uid}:info") or str(uid)
+        except Exception as e:
+            logger.error(f"Redis error in admin_show_users/info: {e}", exc_info=True)
+            info = str(uid)
+        markup.add(types.InlineKeyboardButton(
+            text=f"{info} (id:{uid})", callback_data=f"admin_reply_{uid}"
+        ))
+    safe_send(message.chat.id, "Оберіть користувача для відповіді:", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('reply_'))
-def handle_admin_reply_callback(call):
-    if not is_admin(call.from_user.id):
-        bot.answer_callback_query(call.id, "❌ Немає доступу")
-        return
-    user_id = int(call.data.split('_')[1])
-    set_admin_reply_target(config.ADMIN_ID, user_id)
-    set_user_state(config.ADMIN_ID, f"{UserStates.ADMIN_REPLYING}_{user_id}")
-    bot.answer_callback_query(call.id, "Напишіть відповідь наступним повідомленням")
-    bot.send_message(
-        config.ADMIN_ID,
-        f"✍️ Напишіть відповідь клієнту (ID: {user_id}):\n\n"
-        "_Наступне повідомлення буде відправлено клієнту_"
-    )
-    return
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_reply_"))
+def admin_select_user_for_reply(call):
+    admin_id = call.from_user.id
+    try:
+        user_id = int(call.data.replace("admin_reply_", ""))
+        set_admin_reply_target(admin_id, user_id)
+        safe_send(admin_id, f"Ви обрали користувача id: {user_id}. Введіть відповідь для нього.")
+    except Exception as e:
+        logger.error(f"Callback error in admin_select_user_for_reply: {e}", exc_info=True)
+        safe_send(admin_id, "❌ Трапилась помилка при виборі користувача.")
 
-@bot.message_handler(func=lambda message: is_admin(message.from_user.id))
-def handle_admin_reply_or_panel(message):
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_admin_reply_target(m.from_user.id))
+@safe_handler
+def admin_reply_to_selected_user(message):
     admin_id = message.from_user.id
+    user_id = get_admin_reply_target(admin_id)
+    try:
+        incr_stat("admin_replies")
+        logger.info(f"Admin {admin_id} replies to user {user_id}: {message.text[:60]}")
+        safe_send(user_id, Messages.ADMIN_REPLY.format(message.text), parse_mode='Markdown')
+        safe_send(admin_id, "✅ Відповідь відправлено користувачу.")
+    except Exception as e:
+        logger.error(f"Error sending reply from admin to user: {e}", exc_info=True)
+        safe_send(admin_id, f"❌ Не вдалося відправити відповідь: {e}")
+    clear_admin_reply_target(admin_id)
 
-    # 1. Якщо reply на forward-повідомлення (адмін просто відповідає у Telegram)
-    if message.reply_to_message and message.reply_to_message.forward_from:
-        user_id = message.reply_to_message.forward_from.id
-        sanitized_reply = sanitize_input(message.text)
-        bot.send_message(
-            user_id,
-            Messages.ADMIN_REPLY.format(sanitized_reply),
-            parse_mode='Markdown'
-        )
-        bot.send_message(
-            admin_id,
-            f"✅ Відповідь відправлено клієнту (ID: {user_id})",
-            reply_to_message_id=message.message_id
-        )
-        return
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
+@safe_handler
+def admin_stats(message):
+    total_users = len(get_all_user_ids())
+    user_requests = get_stat("user_requests")
+    admin_replies = get_stat("admin_replies")
+    active_chats = len([uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE])
+    uptime_seconds = int(time.time() - bot_start_time)
+    uptime_hours = uptime_seconds // 3600
+    uptime_minutes = (uptime_seconds % 3600) // 60
+    start_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))
 
-    # 2. Якщо адмін у callback-режимі (натиснув "Відповісти")
-    state = get_user_state(admin_id)
-    if state and state.startswith(UserStates.ADMIN_REPLYING):
-        target_user_id = get_admin_reply_target(admin_id)
-        if not target_user_id:
-            bot.send_message(admin_id, "❌ Помилка: не знайдено користувача для відповіді")
-            return
-        sanitized_reply = sanitize_input(message.text)
-        bot.send_message(
-            target_user_id,
-            Messages.ADMIN_REPLY.format(sanitized_reply),
-            parse_mode='Markdown'
-        )
-        bot.send_message(
-            admin_id,
-            f"✅ Відповідь відправлено клієнту (ID: {target_user_id})",
-            reply_to_message_id=message.message_id
-        )
-        set_user_state(admin_id, UserStates.IDLE)
-        clear_admin_reply_target(admin_id)
-        return
-
-    # 3. Якщо інше — показуємо адмінське меню
-    markup = get_admin_keyboard()
-    bot.send_message(
-        admin_id,
-        Messages.USE_MENU_BUTTONS,
-        reply_markup=markup
+    msg = (
+        f"📊 <b>Статистика бота</b>\n\n"
+        f"👥 Унікальних користувачів: <b>{total_users}</b>\n"
+        f"📨 Заявок від юзерів: <b>{user_requests}</b>\n"
+        f"💬 Відповідей адміна: <b>{admin_replies}</b>\n"
+        f"🟢 Активних чатів: <b>{active_chats}</b>\n"
+        f"⏱ Аптайм: <b>{uptime_hours} год {uptime_minutes} хв</b>\n"
+        f"🚀 Останній рестарт: <b>{start_time_str}</b>"
     )
-    return
+    safe_send(message.chat.id, msg, parse_mode="HTML")
 
-# -------- КІНЕЦЬ: CATCH-ALL HANDLER --------
+# --- Розсилка ---
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
+@safe_handler
+def admin_broadcast_start(message):
+    set_admin_state(message.from_user.id, BROADCAST_STATE)
+    safe_send(message.chat.id, "Введіть текст розсилки, який буде надіслано всім користувачам:")
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_admin_state(m.from_user.id) == BROADCAST_STATE)
+@safe_handler
+def admin_broadcast_process(message):
+    clear_admin_state(message.from_user.id)
+    text = message.text
+    users = get_all_user_ids()
+    delivered = 0
+    errors = 0
+    for i, uid in enumerate(users, start=1):
+        try:
+            bot.send_message(uid, f"📢 <b>Оголошення:</b>\n\n{text}", parse_mode="HTML")
+            delivered += 1
+        except Exception as e:
+            errors += 1
+            logger.warning(f"BROADCAST: failed to {uid}: {e}")
+        if i % 20 == 0:
+            time.sleep(0.5)
+        else:
+            time.sleep(0.12)
+    safe_send(message.chat.id, f"Розсилка завершена!\n\n"
+                               f"Успішно доставлено: <b>{delivered}</b>\n"
+                               f"Помилок: <b>{errors}</b>", parse_mode="HTML")
+    logger.info(f"BROADCAST: sent={delivered}, errors={errors}, total={len(users)}")
+
 @bot.message_handler(func=lambda message: True)
+@safe_handler
 def handle_other_messages(message):
     if is_admin(message.from_user.id):
         markup = get_admin_keyboard()
-        bot.send_message(
+        safe_send(
             message.chat.id,
             Messages.USE_MENU_BUTTONS,
             reply_markup=markup
         )
     else:
         markup = get_main_keyboard()
-        bot.send_message(
+        safe_send(
             message.chat.id,
             Messages.USE_MENU_BUTTONS,
             reply_markup=markup
@@ -470,17 +430,21 @@ bot_start_time = time.time()
 
 @app.route('/')
 def health_check():
-    uptime_seconds = int(time.time() - bot_start_time)
-    uptime_hours = uptime_seconds // 3600
-    uptime_minutes = (uptime_seconds % 3600) // 60
-    return f"""
-    <h1>🎵 Kuznya Music Studio Bot</h1>
-    <p><strong>Статус:</strong> ✅ Активний</p>
-    <p><strong>Uptime:</strong> {uptime_hours}год {uptime_minutes}хв</p>
-    <p><strong>Час запуску:</strong> {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))}</p>
-    <p><strong>Поточний час:</strong> {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
-    <p><strong>Користувачів:</strong> {len(get_all_user_ids())}</p>
-    """
+    try:
+        uptime_seconds = int(time.time() - bot_start_time)
+        uptime_hours = uptime_seconds // 3600
+        uptime_minutes = (uptime_seconds % 3600) // 60
+        return f"""
+        <h1>🎵 Kuznya Music Studio Bot</h1>
+        <p><strong>Статус:</strong> ✅ Активний</p>
+        <p><strong>Uptime:</strong> {uptime_hours}год {uptime_minutes}хв</p>
+        <p><strong>Час запуску:</strong> {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))}</p>
+        <p><strong>Поточний час:</strong> {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
+        <p><strong>Користувачів:</strong> {len(get_all_user_ids())}</p>
+        """
+    except Exception as e:
+        logger.error(f"Health page error: {e}", exc_info=True)
+        return "<h1>Internal Error</h1>", 500
 
 @app.route('/health')
 def health():
@@ -495,7 +459,7 @@ def health():
             "version": "3.0-admin-panel-redis"
         }), 200
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error(f"Health check failed: {e}", exc_info=True)
         return jsonify({
             "status": "error",
             "error": str(e),
@@ -519,7 +483,7 @@ def status():
             "timestamp": time.time()
         })
     except Exception as e:
-        logger.error(f"Status check failed: {e}")
+        logger.error(f"Status check failed: {e}", exc_info=True)
         return jsonify({
             "bot_status": "error",
             "error": str(e),
@@ -528,20 +492,28 @@ def status():
 
 @app.route('/keepalive')
 def keep_alive():
-    return jsonify({
-        "message": "Bot is alive!",
-        "timestamp": time.time(),
-        "uptime": int(time.time() - bot_start_time)
-    })
+    try:
+        return jsonify({
+            "message": "Bot is alive!",
+            "timestamp": time.time(),
+            "uptime": int(time.time() - bot_start_time)
+        })
+    except Exception as e:
+        logger.error(f"/keepalive error: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
 
 # --- WEBHOOK ENDPOINT ---
 @app.route(f"/bot{config.TOKEN}", methods=["POST"])
 def webhook():
     if request.headers.get("content-type") == "application/json":
-        json_string = request.get_data().decode("utf-8")
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return "", 200
+        try:
+            json_string = request.get_data().decode("utf-8")
+            update = telebot.types.Update.de_json(json_string)
+            bot.process_new_updates([update])
+            return "", 200
+        except Exception as e:
+            logger.error(f"Webhook processing error: {e}", exc_info=True)
+            return "", 500
     else:
         return "", 403
 
@@ -586,5 +558,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
-        logger.critical(f"Critical error: {e}")
+        logger.critical(f"Critical error: {e}", exc_info=True)
         exit(1)
