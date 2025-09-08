@@ -1,8 +1,3 @@
-"""
-Kuznya Music Studio Telegram Bot - Enhanced Dialog & Admin System + реферальна програма
-Version: 3.1 | Render/In-Memory | Telebot
-"""
-
 import os
 import time
 import html
@@ -211,7 +206,7 @@ def get_main_keyboard():
     )
     markup.add(
         types.KeyboardButton("ℹ️ Про студію"),
-        types.KeyboardButton("🔗 Поділитись ботом")  # Новинка!
+        types.KeyboardButton("🔗 Поділитись ботом")
     )
     return markup
 
@@ -351,9 +346,6 @@ def handle_start(message):
                 reply_markup=markup
             )
 
-# === Далі залишаєш всю логіку бота як у твоєму робочому файлі ===
-# ... (handlers діалогів, адмінки, broadcast, health endpoints тощо)
-
 # === MAIN EXECUTION ===
 if __name__ == "__main__":
     try:
@@ -381,4 +373,3 @@ if __name__ == "__main__":
         except:
             pass
         exit(1)
-
