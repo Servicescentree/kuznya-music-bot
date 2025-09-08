@@ -1,3 +1,4 @@
-pyTelegramBotAPI==4.14.0
+pyTelegramBotAPI
 redis
-python-dotenv
+flask
+requests
