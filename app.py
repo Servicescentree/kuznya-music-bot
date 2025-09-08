@@ -22,14 +22,18 @@ r = redis.from_url(REDIS_URL, decode_responses=True)
 # -------- CONFIG --------
 @dataclass
 class BotConfig:
-    TOKEN: str = os.environ['BOT_TOKEN']
-    ADMIN_ID: int = int(os.environ['ADMIN_ID'])
+    TOKEN: str = os.environ.get('BOT_TOKEN', '')
+    ADMIN_ID: int = int(os.environ.get('ADMIN_ID', '0'))
     CHANNEL_URL: str = 'https://t.me/kuznya_music'
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
     WEBHOOK_PORT: int = int(os.environ.get('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
     RATE_LIMIT_MESSAGES: int = 5
-    WEBHOOK_URL: str = os.environ['WEBHOOK_URL']
+    WEBHOOK_URL: str = os.environ.get('WEBHOOK_URL', '')
+
+config = BotConfig()
+if not config.TOKEN or not config.ADMIN_ID or not config.WEBHOOK_URL:
+    raise ValueError("BOT_TOKEN, ADMIN_ID, or WEBHOOK_URL missing in environment variables!")
 
 # -------- TEXTS --------
 class Messages:
@@ -75,7 +79,7 @@ class Messages:
     ADMIN_REPLY = "💬 <b>Відповідь від адміністратора:</b>\n\n{}"
     USE_MENU_BUTTONS = "🤔 Використовуйте кнопки меню для навігації"
     ERROR_SEND_FAILED = "❌ Помилка при відправці повідомлення. Спробуйте пізніше."
-    ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {BotConfig.MAX_MESSAGE_LENGTH} символів."
+    ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {config.MAX_MESSAGE_LENGTH} символів."
     ERROR_RATE_LIMITED = "❌ Забагато повідомлень. Зачекайте хвилинку."
     ERROR_INVALID_INPUT = "❌ Некоректне повідомлення. Спробуйте ще раз."
 
@@ -117,8 +121,7 @@ def safe_send(chat_id, text, **kwargs):
     except Exception as e:
         logger.error(f"Telegram send_message error: {e}", exc_info=True)
 
-# -------- SETUP --------
-config = BotConfig()
+# -------- BOT SETUP --------
 bot = telebot.TeleBot(config.TOKEN)
 try:
     bot_info = bot.get_me()
@@ -315,14 +318,20 @@ def handle_contacts(message):
 @bot.message_handler(func=lambda m: m.text == "🎤 Записати трек")
 @safe_handler
 def handle_record(message):
+    set_user_state(message.from_user.id, UserStates.WAITING_FOR_MESSAGE)
     safe_send(message.chat.id, Messages.RECORDING_PROMPT, parse_mode="HTML")
 
-@bot.message_handler(func=lambda m: m.text and m.text.lower().startswith("запис"))
+@bot.message_handler(func=lambda m: get_user_state(m.from_user.id) == UserStates.WAITING_FOR_MESSAGE)
 @safe_handler
 def handle_user_request(message):
+    valid, err = validate_message(message)
+    if not valid:
+        safe_send(message.chat.id, err, parse_mode="HTML")
+        return
     incr_stat("user_requests")
     send_user_request_to_admin(message.from_user.id, message.text)
     safe_send(message.chat.id, Messages.MESSAGE_SENT, parse_mode="HTML")
+    set_user_state(message.from_user.id, UserStates.IDLE)
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
 @safe_handler
