@@ -1,8 +1,3 @@
-"""
-Kuznya Music Studio Telegram Bot - Enhanced Dialog & Admin System + реферальна програма
-Version: 3.1 | Render/In-Memory | Telebot
-"""
-
 import os
 import time
 import html
@@ -274,7 +269,43 @@ def get_user_info(user):
 
 def sanitize_input(text): return html.escape(text.strip())
 
-# === REFERRAL HANDLERS ===
+# === HANDLERS FOR ALL BUTTONS ===
+
+@bot.message_handler(func=lambda m: m.text == "💬 Почати діалог")
+def handle_dialog_start(message):
+    user_id = message.from_user.id
+    if dialog_manager.is_user_in_dialog(user_id):
+        bot.send_message(user_id, "Ви вже у діалозі!", reply_markup=get_dialog_keyboard())
+        return
+    dialog_manager.start_dialog(user_id, config.ADMIN_ID)
+    bot.send_message(user_id, Messages.DIALOG_STARTED, reply_markup=get_dialog_keyboard())
+    bot.send_message(config.ADMIN_ID, f"🔔 Новий діалог з користувачем {message.from_user.full_name} (id: {user_id})")
+
+@bot.message_handler(func=lambda m: m.text == "🎧 Наші роботи")
+def handle_examples(message):
+    bot.send_message(message.from_user.id, Messages.EXAMPLES_INFO.format(config.EXAMPLES_URL), parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: m.text == "📢 Підписатися")
+def handle_channel(message):
+    bot.send_message(message.from_user.id, Messages.CHANNEL_INFO.format(config.CHANNEL_URL), parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: m.text == "📲 Контакти")
+def handle_contacts(message):
+    bot.send_message(message.from_user.id, Messages.CONTACTS_INFO, parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: m.text == "ℹ️ Про студію")
+def handle_about(message):
+    bot.send_message(message.from_user.id, Messages.ABOUT_INFO, parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: m.text == "❌ Завершити діалог")
+def handle_dialog_end(message):
+    user_id = message.from_user.id
+    if dialog_manager.is_user_in_dialog(user_id):
+        dialog_manager.end_dialog(user_id)
+        bot.send_message(user_id, Messages.DIALOG_ENDED_USER, reply_markup=get_main_keyboard())
+        bot.send_message(config.ADMIN_ID, f"❌ Діалог з {user_id} завершено.")
+    else:
+        bot.send_message(user_id, "У вас немає активного діалогу.", reply_markup=get_main_keyboard())
 
 @bot.message_handler(func=lambda m: m.text == "🔗 Поділитись ботом")
 def handle_share_bot(message):
