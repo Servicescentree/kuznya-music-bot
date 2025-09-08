@@ -299,6 +299,27 @@ def handle_start(message):
         reply_markup=get_main_keyboard()
     )
 
+# --- Основні кнопки меню ---
+@bot.message_handler(func=lambda m: m.text == "🎧 Приклади робіт")
+@safe_handler
+def handle_examples(message):
+    safe_send(message.chat.id, Messages.EXAMPLES_INFO.format(config.EXAMPLES_URL), parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: m.text == "📢 Підписатися")
+@safe_handler
+def handle_channel(message):
+    safe_send(message.chat.id, Messages.CHANNEL_INFO.format(config.CHANNEL_URL), parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: m.text == "📲 Контакти")
+@safe_handler
+def handle_contacts(message):
+    safe_send(message.chat.id, Messages.CONTACTS_INFO, parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: m.text == "🎤 Записати трек")
+@safe_handler
+def handle_record(message):
+    safe_send(message.chat.id, Messages.RECORDING_PROMPT, parse_mode="Markdown")
+
 # Користувач надсилає заявку (приклад для хендлера заявки)
 @bot.message_handler(func=lambda m: m.text and m.text.lower().startswith("запис"))
 @safe_handler
@@ -406,6 +427,7 @@ def admin_broadcast_process(message):
                                f"Помилок: <b>{errors}</b>", parse_mode="HTML")
     logger.info(f"BROADCAST: sent={delivered}, errors={errors}, total={len(users)}")
 
+# --- Fallback хендлер --- (має бути останнім!)
 @bot.message_handler(func=lambda message: True)
 @safe_handler
 def handle_other_messages(message):
