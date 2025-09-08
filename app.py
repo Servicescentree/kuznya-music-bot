@@ -1,9 +1,13 @@
+"""
+Kuznya Music Studio Telegram Bot - Render Optimized Version with Self-Ping
+Improved version with proper error handling, logging, security, and in-memory storage for Render compatibility.
+Added built-in self-ping thread so the bot never sleeps on Render (no external monitor needed).
+"""
+
 import os
 import time
 import html
 import logging
-import random
-import string
 from threading import Thread
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
@@ -12,247 +16,426 @@ import telebot
 from telebot import types
 from flask import Flask, jsonify
 
-import requests  # <-- для self-ping
+import requests  # for self-ping
 
-# === CONFIGURATION ===
+# Configuration
 @dataclass
 class BotConfig:
-    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAF094UtSmRBYB98JUtVwYHzREuVicQFIOs')
+    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAFPu81rvI7ISpmtixdgD1cOybAQ6T_rMjI')
     ADMIN_ID: int = int(os.getenv('ADMIN_ID', '7276479457'))
     CHANNEL_URL: str = 'https://t.me/kuznya_music'
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
     WEBHOOK_PORT: int = int(os.getenv('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
-    RATE_LIMIT_MESSAGES: int = 5
+    RATE_LIMIT_MESSAGES: int = 5  # messages per minute
 
-# === TEXTS ===
+# Text messages
 class Messages:
     WELCOME = """Привіт, {}! 👋
 Ласкаво просимо до музичної студії Kuznya Music!
 
 Оберіть дію з меню:"""
-    EXAMPLES_INFO = """🎵 *Наші роботи:*\n\nПослухати приклади можна тут:\n{}"""
-    CHANNEL_INFO = """📢 *Підписуйтесь на наш канал:*\n\n{}"""
-    CONTACTS_INFO = """📲 *Контакти студії:*\nTelegram: @kuznya_music"""
-    ABOUT_INFO = """ℹ️ *Про студію*\n\nKuznya Music - сучасна музична студія для запису, зведення, майстерингу, аранжування та творчих експериментів."""
-    DIALOG_STARTED = "✅ Діалог розпочато! Пишіть повідомлення адміністратору."
-    DIALOG_ENDED_USER = "✅ Діалог завершено. Дякуємо за спілкування!"
-    DIALOG_ENDED_ADMIN = "✅ Діалог завершено адміністратором. Ви можете почати новий діалог!"
-    ADMIN_PANEL = "👨‍💼 <b>Адмін-панель</b>\n\nОберіть дію:"
-    ERROR_SEND_FAILED = "❌ Помилка при відправці повідомлення. Спробуйте пізніше."
+    
+    RECORDING_PROMPT = """🎤 *Запис треку*
+
+Опишіть ваші побажання:
+• Запис, Зведення
+• Аранжування 
+• Референси (приклади)
+• Терміни (коли хочете записатись)
+
+_Ваше повідомлення буде передано адміністратору_"""
+    
+    EXAMPLES_INFO = """🎵 *Наші роботи:*
+
+Послухати приклади можна тут:
+{}
+
+Тут ви знайдете найкращі зразки нашої творчості!"""
+    
+    CHANNEL_INFO = """📢 *Підписуйтесь на наш канал:*
+
+{}
+
+Там ви знайдете:
+• Нові роботи
+• Закулісся студії
+• Акції та знижки"""
+    
+    CONTACTS_INFO = """📲 *Контакти студії:*
+
+Telegram: @kuznya_music
+Або використовуйте кнопку '🎤 Записати трек' для прямого зв'язку"""
+    
+    MESSAGE_SENT = """✅ Повідомлення відправлено адміністратору!
+Очікуйте відповіді...
+
+_Ви можете відправити додаткові повідомлення або завершити діалог_"""
+    
+    DIALOG_ENDED = "✅ Діалог завершено. Повертаємося до головного меню."
+    ADMIN_REPLY = "💬 *Відповідь від адміністратора:*\n\n{}"
     USE_MENU_BUTTONS = "🤔 Використовуйте кнопки меню для навігації"
-    BROADCAST_PROMPT = "📢 Введіть текст для розсилки всім користувачам або натисніть '❌ Скасувати'"
-    BROADCAST_DONE = "📊 Розсилка завершена!"
-    BROADCAST_CANCELLED = "❌ Розсилка скасована."
+    
+    # Error messages
+    ERROR_SEND_FAILED = "❌ Помилка при відправці повідомлення. Спробуйте пізніше."
+    ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {BotConfig.MAX_MESSAGE_LENGTH} символів."
+    ERROR_RATE_LIMITED = "❌ Забагато повідомлень. Зачекайте хвилинку."
+    ERROR_INVALID_INPUT = "❌ Некоректне повідомлення. Спробуйте ще раз."
 
-# === ENHANCED DIALOG MANAGER ===
-class EnhancedDialogManager:
-    def __init__(self):
-        self.active_dialogs = {}
-        self.admin_current_dialog = {}
-        self.message_history = {}
-        self.users = {}
-        self.user_states = {}
-        self.stats = {
-            'total_messages': 0,
-            'total_dialogs': 0,
-            'bot_start_time': time.time()
-        }
-        self.admin_broadcast_mode = False
-        self.broadcast_text = ""
+# User states
+class UserStates:
+    IDLE = 'idle'
+    WAITING_FOR_MESSAGE = 'waiting_for_message'
+    ADMIN_REPLYING = 'admin_replying'
 
-    def save_user(self, user_id, username, full_name):
-        now = time.time()
-        if user_id in self.users:
-            self.users[user_id].update({
-                'username': username,
-                'full_name': full_name,
-                'last_activity': now,
-                'total_messages': self.users[user_id].get('total_messages', 0) + 1
-            })
-        else:
-            self.users[user_id] = {
-                'username': username,
-                'full_name': full_name,
-                'first_seen': now,
-                'last_activity': now,
-                'total_messages': 1
-            }
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]  # Only console logging for Render
+)
+logger = logging.getLogger(__name__)
 
-    def get_user_info(self, user_id):
-        return self.users.get(user_id, {})
+# Initialize configuration
+config = BotConfig()
 
-    def get_all_users(self):
-        return [
-            (user_id, info['username'], info['full_name'], info['total_messages'], info['last_activity'], self.is_user_in_dialog(user_id))
-            for user_id, info in self.users.items()
-        ]
+# Validate configuration
+if not config.TOKEN or not config.ADMIN_ID:
+    logger.error("Missing required environment variables: BOT_TOKEN or ADMIN_ID")
+    exit(1)
 
-    def set_user_state(self, user_id, state):
-        self.user_states[user_id] = state
+# Initialize bot
+try:
+    bot = telebot.TeleBot(config.TOKEN)
+    logger.info("Testing bot token...")
+    bot_info = bot.get_me()
+    logger.info(f"Bot token is valid! Bot name: {bot_info.first_name} (@{bot_info.username})")
+except Exception as token_error:
+    logger.error(f"Invalid bot token: {token_error}")
+    logger.error(f"Token used: {config.TOKEN}")
+    exit(1)
 
-    def get_user_state(self, user_id):
-        return self.user_states.get(user_id, 'idle')
+# In-memory storage instead of SQLite (Render-friendly)
+user_states = {}  # user_id: state
+rate_limits = {}  # user_id: {'count': int, 'last_reset': timestamp}
+admin_replies = {}  # admin_id: target_user_id
 
-    def clear_user_state(self, user_id):
-        self.user_states.pop(user_id, None)
+# Database operations replaced with in-memory functions
+class MemoryManager:
+    @staticmethod
+    def get_user_state(user_id: int) -> str:
+        return user_states.get(user_id, UserStates.IDLE)
+    
+    @staticmethod
+    def set_user_state(user_id: int, state: str):
+        user_states[user_id] = state
+        logger.info(f"Set user {user_id} state to {state}")
+    
+    @staticmethod
+    def clear_user_state(user_id: int):
+        user_states.pop(user_id, None)
+        logger.info(f"Cleared state for user {user_id}")
+    
+    @staticmethod
+    def check_rate_limit(user_id: int) -> bool:
+        current_time = int(time.time())
+        if user_id not in rate_limits:
+            rate_limits[user_id] = {'count': 1, 'last_reset': current_time}
+            return True
+        user_limit = rate_limits[user_id]
+        if current_time - user_limit['last_reset'] > 60:
+            rate_limits[user_id] = {'count': 1, 'last_reset': current_time}
+            return True
+        if user_limit['count'] < config.RATE_LIMIT_MESSAGES:
+            user_limit['count'] += 1
+            return True
+        return False
 
-    def start_dialog(self, user_id, admin_id):
-        if user_id in self.active_dialogs:
-            return False
-        dialog_id = f"{user_id}_{admin_id}_{int(time.time())}"
-        self.active_dialogs[user_id] = {
-            'admin_id': admin_id,
-            'started_at': time.time(),
-            'message_count': 0,
-            'dialog_id': dialog_id
-        }
-        self.message_history[dialog_id] = []
-        self.stats['total_dialogs'] += 1
-        self.set_user_state(user_id, 'in_dialog')
-        return dialog_id
+def validate_message(message) -> tuple[bool, str]:
+    if not message or not message.text:
+        return False, Messages.ERROR_INVALID_INPUT
+    if len(message.text) > config.MAX_MESSAGE_LENGTH:
+        return False, Messages.ERROR_MESSAGE_TOO_LONG
+    if not MemoryManager.check_rate_limit(message.from_user.id):
+        return False, Messages.ERROR_RATE_LIMITED
+    return True, ""
 
-    def end_dialog(self, user_id):
-        if user_id in self.active_dialogs:
-            admin_id = self.active_dialogs[user_id]['admin_id']
-            if self.admin_current_dialog.get(admin_id) == user_id:
-                self.admin_current_dialog.pop(admin_id, None)
-                self.clear_user_state(admin_id)
-            dialog_id = self.active_dialogs[user_id]['dialog_id']
-            self.active_dialogs.pop(user_id, None)
-            self.clear_user_state(user_id)
+def sanitize_input(text: str) -> str:
+    return html.escape(text.strip())
 
-    def is_user_in_dialog(self, user_id):
-        return user_id in self.active_dialogs
-
-    def get_active_dialogs(self):
-        dialogs = []
-        for user_id, dialog_info in self.active_dialogs.items():
-            user_info = self.get_user_info(user_id)
-            dialogs.append({
-                'user_id': user_id,
-                'admin_id': dialog_info['admin_id'],
-                'started_at': dialog_info['started_at'],
-                'message_count': dialog_info['message_count'],
-                'username': user_info.get('username', ''),
-                'full_name': user_info.get('full_name', 'Unknown'),
-                'dialog_id': dialog_info['dialog_id']
-            })
-        return sorted(dialogs, key=lambda x: x['started_at'], reverse=True)
-
-    def set_admin_current_dialog(self, admin_id, user_id):
-        self.admin_current_dialog[admin_id] = user_id
-        self.set_user_state(admin_id, 'admin_in_dialog')
-
-    def get_admin_current_dialog(self, admin_id):
-        return self.admin_current_dialog.get(admin_id)
-
-    def save_message(self, user_id, message_text, is_admin=False):
-        self.stats['total_messages'] += 1
-        dialog_info = self.active_dialogs.get(user_id)
-        if dialog_info:
-            dialog_id = dialog_info['dialog_id']
-            self.message_history[dialog_id].append({
-                'user_id': user_id,
-                'message': message_text,
-                'timestamp': time.time(),
-                'is_admin': is_admin
-            })
-            self.active_dialogs[user_id]['message_count'] += 1
-
-    def get_statistics(self):
-        return {
-            'total_users': len(self.users),
-            'active_dialogs': len(self.active_dialogs),
-            'total_messages': self.stats['total_messages'],
-            'total_dialogs': self.stats['total_dialogs'],
-            'uptime_seconds': int(time.time() - self.stats['bot_start_time']),
-            'users_in_dialog': len([u for u in self.users.keys() if self.is_user_in_dialog(u)])
-        }
-
-# === KEYBOARDS ===
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
-        types.KeyboardButton("💬 Почати діалог"),
-        types.KeyboardButton("🎧 Наші роботи")
+        types.KeyboardButton("🎤 Записати трек"),
+        types.KeyboardButton("🎧 Приклади робіт")
     )
     markup.add(
         types.KeyboardButton("📢 Підписатися"),
         types.KeyboardButton("📲 Контакти")
     )
-    markup.add(types.KeyboardButton("ℹ️ Про студію"))
     return markup
 
-def get_dialog_keyboard():
+def get_chat_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(types.KeyboardButton("❌ Завершити діалог"))
     return markup
 
-def get_admin_main_keyboard(dm):
-    stats = dm.get_statistics()
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(
-        types.KeyboardButton(f"💬 Активні діалоги ({stats['active_dialogs']})"),
-        types.KeyboardButton("🆕 Новий діалог")
-    )
-    markup.add(
-        types.KeyboardButton(f"👥 Користувачі ({stats['total_users']})"),
-        types.KeyboardButton("📊 Статистика")
-    )
-    markup.add(types.KeyboardButton("📢 Розсилка"))
-    return markup
+def is_admin(user_id: int) -> bool:
+    return user_id == config.ADMIN_ID
 
-def get_admin_dialog_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(
-        types.KeyboardButton("❌ Завершити діалог"),
-        types.KeyboardButton("🔄 Інший діалог")
-    )
-    markup.add(types.KeyboardButton("🏠 Головне меню"))
-    return markup
-
-def get_cancel_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-    markup.add(types.KeyboardButton("❌ Скасувати"))
-    return markup
-
-# === LOGGING ===
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
-
-config = BotConfig()
-dialog_manager = EnhancedDialogManager()
-
-# === BOT INIT ===
-if not config.TOKEN or not config.ADMIN_ID:
-    logger.error("BOT_TOKEN or ADMIN_ID not set")
-    exit(1)
-
-bot = telebot.TeleBot(config.TOKEN)
-
-def is_admin(user_id): return user_id == config.ADMIN_ID
-
-def get_user_info(user):
+def get_user_info(user) -> Dict[str, Any]:
     return {
         'id': user.id,
-        'username': user.username or "",
-        'first_name': user.first_name or "",
+        'username': user.username or "Без username",
+        'first_name': user.first_name or "Невідомо",
         'last_name': user.last_name or "",
         'full_name': f"{user.first_name or ''} {user.last_name or ''}".strip()
     }
 
-def sanitize_input(text): return html.escape(text.strip())
+# Message handlers
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    try:
+        user_info = get_user_info(message.from_user)
+        logger.info(f"New user started bot: {user_info['id']} (@{user_info['username']})")
+        MemoryManager.set_user_state(message.from_user.id, UserStates.IDLE)
+        markup = get_main_keyboard()
+        bot.send_message(
+            message.chat.id,
+            Messages.WELCOME.format(user_info['first_name']),
+            reply_markup=markup
+        )
+    except Exception as e:
+        logger.error(f"Error in handle_start: {e}")
+        bot.send_message(message.chat.id, Messages.ERROR_SEND_FAILED)
 
-# === MESSAGE HANDLERS ===
-# ... (тут залишаєш усі свої обробники, як раніше)
+@bot.message_handler(func=lambda message: message.text == "🎤 Записати трек")
+def handle_start_recording(message):
+    try:
+        user_id = message.from_user.id
+        MemoryManager.set_user_state(user_id, UserStates.WAITING_FOR_MESSAGE)
+        markup = get_chat_keyboard()
+        bot.send_message(
+            message.chat.id,
+            Messages.RECORDING_PROMPT,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        logger.info(f"User {user_id} entered recording mode")
+    except Exception as e:
+        logger.error(f"Error in handle_start_recording: {e}")
+        bot.send_message(message.chat.id, Messages.ERROR_SEND_FAILED)
 
-# === FLASK HEALTH ===
+@bot.message_handler(func=lambda message: message.text == "🎧 Приклади робіт")
+def handle_show_examples(message):
+    try:
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton(
+            "До прикладів 🎧",
+            url=config.EXAMPLES_URL
+        ))
+        bot.send_message(
+            message.chat.id,
+            "🎵 Наші роботи:\n\nПриклади: Аранжування 🎹 | Зведення 🎧 | Мастерингу 🔊",
+            reply_markup=markup
+        )
+        logger.info(f"Examples message sent successfully to {message.from_user.id}")
+    except Exception as e:
+        logger.error(f"Error in handle_show_examples: {e}")
+        bot.send_message(message.chat.id, Messages.ERROR_SEND_FAILED)
+
+@bot.message_handler(func=lambda message: message.text == "📢 Підписатися")
+def handle_show_channel(message):
+    try:
+        logger.info(f"User {message.from_user.id} requested channel info")
+        bot.send_message(
+            message.chat.id,
+            Messages.CHANNEL_INFO.format(config.CHANNEL_URL),
+            disable_web_page_preview=False
+        )
+        logger.info(f"Channel message sent successfully to {message.from_user.id}")
+    except Exception as e:
+        logger.error(f"Error in handle_show_channel: {e}")
+        bot.send_message(message.chat.id, Messages.ERROR_SEND_FAILED)
+
+@bot.message_handler(func=lambda message: message.text == "📲 Контакти")
+def handle_show_contacts(message):
+    try:
+        bot.send_message(
+            message.chat.id,
+            Messages.CONTACTS_INFO
+        )
+    except Exception as e:
+        logger.error(f"Error in handle_show_contacts: {e}")
+        bot.send_message(message.chat.id, Messages.ERROR_SEND_FAILED)
+
+@bot.message_handler(func=lambda message: message.text == "❌ Завершити діалог")
+def handle_end_dialog(message):
+    try:
+        user_id = message.from_user.id
+        MemoryManager.clear_user_state(user_id)
+        markup = get_main_keyboard()
+        bot.send_message(
+            message.chat.id,
+            Messages.DIALOG_ENDED,
+            reply_markup=markup
+        )
+        logger.info(f"User {user_id} ended dialog")
+    except Exception as e:
+        logger.error(f"Error in handle_end_dialog: {e}")
+        bot.send_message(message.chat.id, Messages.ERROR_SEND_FAILED)
+
+@bot.message_handler(func=lambda message: MemoryManager.get_user_state(message.from_user.id) == UserStates.WAITING_FOR_MESSAGE)
+def handle_user_message(message):
+    try:
+        is_valid, error_msg = validate_message(message)
+        if not is_valid:
+            bot.send_message(message.chat.id, error_msg)
+            return
+        user_info = get_user_info(message.from_user)
+        sanitized_text = sanitize_input(message.text)
+        admin_text = f"""💬 *Нове повідомлення від клієнта*
+
+👤 *Клієнт:* {user_info['full_name']} (@{user_info['username']})
+🆔 *ID:* `{user_info['id']}`
+⏰ *Час:* {time.strftime('%H:%M %d.%m.%Y')}
+
+📝 *Повідомлення:*
+{sanitized_text}"""
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton(
+            "✍️ Відповісти",
+            callback_data=f"reply_{user_info['id']}"
+        ))
+        bot.send_message(
+            config.ADMIN_ID,
+            admin_text,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        bot.send_message(message.chat.id, Messages.MESSAGE_SENT)
+        logger.info(f"Message forwarded from user {user_info['id']} to admin")
+    except telebot.apihelper.ApiException as e:
+        logger.error(f"Telegram API error in handle_user_message: {e}")
+        bot.send_message(message.chat.id, Messages.ERROR_SEND_FAILED)
+    except Exception as e:
+        logger.error(f"Error in handle_user_message: {e}")
+        bot.send_message(message.chat.id, Messages.ERROR_SEND_FAILED)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('reply_'))
+def handle_admin_reply_callback(call):
+    try:
+        if not is_admin(call.from_user.id):
+            bot.answer_callback_query(call.id, "❌ Немає доступу")
+            return
+        user_id = int(call.data.split('_')[1])
+        admin_replies[config.ADMIN_ID] = user_id
+        MemoryManager.set_user_state(config.ADMIN_ID, f"{UserStates.ADMIN_REPLYING}_{user_id}")
+        bot.answer_callback_query(call.id, "Напишіть відповідь наступним повідомленням")
+        bot.send_message(
+            config.ADMIN_ID,
+            f"✍️ Напишіть відповідь клієнту (ID: {user_id}):\n\n"
+            "_Наступне повідомлення буде відправлено клієнту_"
+        )
+        logger.info(f"Admin started replying to user {user_id}")
+    except Exception as e:
+        logger.error(f"Error in handle_admin_reply_callback: {e}")
+        bot.answer_callback_query(call.id, "❌ Помилка")
+
+@bot.message_handler(func=lambda message: is_admin(message.from_user.id) and MemoryManager.get_user_state(message.from_user.id).startswith(UserStates.ADMIN_REPLYING))
+def handle_admin_reply(message):
+    try:
+        target_user_id = admin_replies.get(config.ADMIN_ID)
+        if not target_user_id:
+            bot.send_message(config.ADMIN_ID, "❌ Помилка: не знайдено користувача для відповіді")
+            return
+        sanitized_reply = sanitize_input(message.text)
+        bot.send_message(
+            target_user_id,
+            Messages.ADMIN_REPLY.format(sanitized_reply),
+            parse_mode='Markdown'
+        )
+        bot.send_message(
+            config.ADMIN_ID,
+            f"✅ Відповідь відправлено клієнту (ID: {target_user_id})"
+        )
+        MemoryManager.set_user_state(config.ADMIN_ID, UserStates.IDLE)
+        admin_replies.pop(config.ADMIN_ID, None)
+        logger.info(f"Admin replied to user {target_user_id}")
+    except telebot.apihelper.ApiException as e:
+        logger.error(f"Failed to send admin reply: {e}")
+        bot.send_message(config.ADMIN_ID, f"❌ Помилка при відправці: користувач заблокував бота")
+    except Exception as e:
+        logger.error(f"Error in handle_admin_reply: {e}")
+        bot.send_message(config.ADMIN_ID, f"❌ Помилка при відправці: {e}")
+    finally:
+        MemoryManager.set_user_state(config.ADMIN_ID, UserStates.IDLE)
+        admin_replies.pop(config.ADMIN_ID, None)
+
+@bot.message_handler(commands=['admin'], func=lambda message: is_admin(message.from_user.id))
+def handle_admin_panel(message):
+    try:
+        active_users = len([uid for uid, state in user_states.items() if state == UserStates.WAITING_FOR_MESSAGE])
+        total_users = len(user_states)
+        admin_text = f"""👨‍💼 *Панель адміністратора*
+
+📊 Активних діалогів: {active_users}
+👥 Всього користувачів: {total_users}
+🤖 Бот працює нормально
+
+💡 *Команди:*
+/stats - детальна статистика"""
+        bot.send_message(
+            config.ADMIN_ID,
+            admin_text,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error in handle_admin_panel: {e}")
+        bot.send_message(config.ADMIN_ID, "❌ Помилка при завантаженні панелі")
+
+@bot.message_handler(commands=['stats'], func=lambda message: is_admin(message.from_user.id))
+def handle_stats(message):
+    try:
+        active_users = len([uid for uid, state in user_states.items() if state == UserStates.WAITING_FOR_MESSAGE])
+        total_users = len(user_states)
+        active_hour = len([uid for uid, data in rate_limits.items() if time.time() - data['last_reset'] < 3600])
+        stats_text = f"""📊 *Детальна статистика*
+
+👥 Всього користувачів: {total_users}
+💬 Активних чатів: {active_users}
+⏰ Активних за годину: {active_hour}
+📅 Дата: {time.strftime('%d.%m.%Y %H:%M')}
+
+🔧 Технічна інформація:
+• Зберігання: In-Memory (Render-optimized)
+• Логування: активне
+• Рейт-лімітинг: {config.RATE_LIMIT_MESSAGES} повідомлень/хвилину"""
+        bot.send_message(
+            config.ADMIN_ID,
+            stats_text,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error in handle_stats: {e}")
+        bot.send_message(config.ADMIN_ID, "❌ Помилка при завантаженні статистики")
+
+@bot.message_handler(func=lambda message: True)
+def handle_other_messages(message):
+    try:
+        if MemoryManager.get_user_state(message.from_user.id) == UserStates.IDLE:
+            markup = get_main_keyboard()
+            bot.send_message(
+                message.chat.id,
+                Messages.USE_MENU_BUTTONS,
+                reply_markup=markup
+            )
+    except Exception as e:
+        logger.error(f"Error in handle_other_messages: {e}")
+
+# Flask app for health check and Uptime Robot integration
 app = Flask(__name__)
+
 bot_start_time = time.time()
 
 @app.route('/')
@@ -266,8 +449,52 @@ def health_check():
     <p><strong>Uptime:</strong> {uptime_hours}год {uptime_minutes}хв</p>
     <p><strong>Час запуску:</strong> {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))}</p>
     <p><strong>Поточний час:</strong> {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
-    <p><strong>Користувачів:</strong> {len(dialog_manager.users)}</p>
+    <p><strong>Користувачів:</strong> {len(user_states)}</p>
     """
+
+@app.route('/health')
+def health():
+    try:
+        bot_info = bot.get_me()
+        return jsonify({
+            "status": "healthy",
+            "timestamp": time.time(),
+            "uptime_seconds": int(time.time() - bot_start_time),
+            "bot_username": bot_info.username,
+            "total_users": len(user_states),
+            "version": "2.1-render"
+        }), 200
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
+
+@app.route('/ping')
+def ping():
+    return "pong", 200
+
+@app.route('/status')
+def status():
+    try:
+        active_users = len([uid for uid, state in user_states.items() if state == UserStates.WAITING_FOR_MESSAGE])
+        return jsonify({
+            "bot_status": "running",
+            "uptime_seconds": int(time.time() - bot_start_time),
+            "total_users": len(user_states),
+            "active_chats": active_users,
+            "admin_id": config.ADMIN_ID,
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.error(f"Status check failed: {e}")
+        return jsonify({
+            "bot_status": "error",
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
 
 @app.route('/keepalive')
 def keep_alive():
@@ -279,13 +506,13 @@ def keep_alive():
 
 def run_flask():
     app.run(
-        host='0.0.0.0',
-        port=config.WEBHOOK_PORT,
+        host='0.0.0.0', 
+        port=config.WEBHOOK_PORT, 
         debug=False,
         threaded=True
     )
 
-# === ПРОСТИЙ SELF-PING БЕЗ ENV ===
+# Self-ping every 5 minutes to prevent Render sleep
 def self_ping():
     port = config.WEBHOOK_PORT
     url = f"http://localhost:{port}/keepalive"
@@ -297,22 +524,45 @@ def self_ping():
             print(f"[SELF-PING] Error pinging {url}: {e}")
         time.sleep(300)  # 5 хвилин
 
-# === MAIN EXECUTION ===
 if __name__ == "__main__":
     try:
         logger.info("Starting Kuznya Music Studio Bot...")
         flask_thread = Thread(target=run_flask, daemon=True)
         flask_thread.start()
         logger.info(f"Flask server started on port {config.WEBHOOK_PORT}")
-
-        # --- Self-ping запускаємо окремим потоком ---
         selfping_thread = Thread(target=self_ping, daemon=True)
         selfping_thread.start()
-        logger.info("Self-ping thread started.")
-
-        time.sleep(2)
-        bot.polling(none_stop=True, interval=1, timeout=30)
-
+        logger.info("Self-ping thread started (every 5 minutes).")
+        logger.info("Health check endpoints available:")
+        logger.info(f"  - Main: http://localhost:{config.WEBHOOK_PORT}/")
+        logger.info(f"  - Health: http://localhost:{config.WEBHOOK_PORT}/health")
+        logger.info(f"  - Ping: http://localhost:{config.WEBHOOK_PORT}/ping")
+        logger.info(f"  - Status: http://localhost:{config.WEBHOOK_PORT}/status")
+        try:
+            bot.remove_webhook()
+            bot.stop_polling()
+        except Exception as clear_error:
+            logger.warning(f"Error clearing previous instances: {clear_error}")
+        time.sleep(5)
+        logger.info("🎵 Music Studio Bot started successfully!")
+        logger.info(f"Admin ID: {config.ADMIN_ID}")
+        logger.info("Bot is polling for messages...")
+        while True:
+            try:
+                bot.polling(none_stop=True, interval=1, timeout=30)
+            except telebot.apihelper.ApiTelegramException as api_error:
+                if "409" in str(api_error) or "Conflict" in str(api_error):
+                    logger.warning("Conflict detected - another bot instance running. Retrying in 10 seconds...")
+                    time.sleep(10)
+                    try:
+                        bot.stop_polling()
+                        bot.remove_webhook()
+                    except:
+                        pass
+                    time.sleep(5)
+                    continue
+                else:
+                    raise api_error
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
         try:
