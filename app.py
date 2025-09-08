@@ -82,6 +82,11 @@ class Messages:
     ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {config.MAX_MESSAGE_LENGTH} символів."
     ERROR_RATE_LIMITED = "❌ Забагато повідомлень. Зачекайте хвилинку."
     ERROR_INVALID_INPUT = "❌ Некоректне повідомлення. Спробуйте ще раз."
+    ADMIN_PANEL_WELCOME = (
+        "👑 Вітаємо в адмін-панелі Kuznya Music!\n"
+        "Оберіть дію з меню:"
+    )
+    ADMIN_MENU_NAV = "👑 Ви в адмін-панелі. Скористайтеся кнопками меню:"
 
 # -------- STATES --------
 class UserStates:
@@ -286,13 +291,20 @@ def format_admin_request(user, user_id, message_text, dt):
 @safe_handler
 def handle_start(message):
     add_user(message.from_user.id, message.from_user)
-    logger.info(f"User started: id={message.from_user.id}, name={message.from_user.first_name} @{message.from_user.username}")
-    safe_send(
-        message.chat.id,
-        Messages.WELCOME.format(html.escape(message.from_user.first_name or "")),
-        parse_mode="HTML",
-        reply_markup=get_main_keyboard()
-    )
+    if is_admin(message.from_user.id):
+        safe_send(
+            message.chat.id,
+            Messages.ADMIN_PANEL_WELCOME,
+            parse_mode="HTML",
+            reply_markup=get_admin_keyboard()
+        )
+    else:
+        safe_send(
+            message.chat.id,
+            Messages.WELCOME.format(html.escape(message.from_user.first_name or "")),
+            parse_mode="HTML",
+            reply_markup=get_main_keyboard()
+        )
 
 @bot.message_handler(func=lambda m: m.text == "🎧 Приклади робіт")
 @safe_handler
@@ -365,6 +377,25 @@ def admin_show_users(message):
             text=f"{info} (id:{uid})", callback_data=f"admin_reply_{uid}"
         ))
     safe_send(message.chat.id, "Оберіть користувача для відповіді:", reply_markup=markup, parse_mode="HTML")
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
+@safe_handler
+def admin_show_active_dialogs(message):
+    user_ids = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
+    if not user_ids:
+        safe_send(message.chat.id, "Немає активних діалогів.", parse_mode="HTML")
+        return
+    markup = types.InlineKeyboardMarkup()
+    for uid in user_ids:
+        try:
+            info = r.get(f"user:{uid}:info") or str(uid)
+        except Exception as e:
+            logger.error(f"Redis error in admin_show_active_dialogs/info: {e}", exc_info=True)
+            info = str(uid)
+        markup.add(types.InlineKeyboardButton(
+            text=f"{info} (id:{uid})", callback_data=f"admin_reply_{uid}"
+        ))
+    safe_send(message.chat.id, "Оберіть діалог для відповіді:", reply_markup=markup, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_reply_"))
 def admin_select_user_for_reply(call):
@@ -453,19 +484,17 @@ def admin_broadcast_process(message):
 @safe_handler
 def handle_other_messages(message):
     if is_admin(message.from_user.id):
-        markup = get_admin_keyboard()
         safe_send(
             message.chat.id,
-            Messages.USE_MENU_BUTTONS,
-            reply_markup=markup,
+            Messages.ADMIN_MENU_NAV,
+            reply_markup=get_admin_keyboard(),
             parse_mode="HTML"
         )
     else:
-        markup = get_main_keyboard()
         safe_send(
             message.chat.id,
             Messages.USE_MENU_BUTTONS,
-            reply_markup=markup,
+            reply_markup=get_main_keyboard(),
             parse_mode="HTML"
         )
 
