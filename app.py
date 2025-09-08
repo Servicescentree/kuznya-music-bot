@@ -87,6 +87,7 @@ class Messages:
 class UserStates:
     IDLE = 'idle'
     WAITING_FOR_MESSAGE = 'waiting_for_message'
+    REPLY_TO_ADMIN = 'reply_to_admin'
 
 BROADCAST_STATE = 'waiting_for_broadcast_message'
 
@@ -276,7 +277,7 @@ def format_admin_request(user, user_id, message_text, dt):
         f"{html.escape(message_text)}"
     )
 
-# -------- HANDLERS --------
+# -------- HANDLЕРИ --------
 
 @bot.message_handler(commands=["start"])
 @safe_handler
@@ -301,9 +302,9 @@ def handle_start(message):
 @safe_handler
 def handle_examples(message):
     safe_send(
-        message.chat.id, 
+        message.chat.id,
         Messages.EXAMPLES_INFO.format(
-            html.escape(config.EXAMPLES_URL), 
+            html.escape(config.EXAMPLES_URL),
             html.escape(config.EXAMPLES_URL)
         ),
         parse_mode="HTML"
@@ -313,9 +314,9 @@ def handle_examples(message):
 @safe_handler
 def handle_channel(message):
     safe_send(
-        message.chat.id, 
+        message.chat.id,
         Messages.CHANNEL_INFO.format(
-            html.escape(config.CHANNEL_URL), 
+            html.escape(config.CHANNEL_URL),
             html.escape(config.CHANNEL_URL)
         ),
         parse_mode="HTML"
@@ -329,7 +330,6 @@ def handle_contacts(message):
 @bot.message_handler(func=lambda m: m.text == "🎤 Записати трек")
 @safe_handler
 def handle_record(message):
-    # Якщо вже чекаємо повідомлення — не дублюємо prompt, а даємо підказку
     if get_user_state(message.from_user.id) == UserStates.WAITING_FOR_MESSAGE:
         safe_send(
             message.chat.id,
@@ -356,6 +356,28 @@ def handle_user_request(message):
     markup.add(types.InlineKeyboardButton("✍️ Відповісти", callback_data=f"admin_reply_{user_id}"))
     safe_send(config.ADMIN_ID, msg, parse_mode="HTML", reply_markup=markup)
     safe_send(message.chat.id, Messages.MESSAGE_SENT, parse_mode="HTML")
+    set_user_state(message.from_user.id, UserStates.IDLE)
+
+@bot.callback_query_handler(func=lambda call: call.data == "user_reply_to_admin")
+def user_reply_to_admin_callback(call):
+    user_id = call.from_user.id
+    set_user_state(user_id, UserStates.REPLY_TO_ADMIN)
+    safe_send(user_id, "Напишіть свою відповідь для адміністратора 👇", parse_mode="HTML")
+
+@bot.message_handler(func=lambda m: get_user_state(m.from_user.id) == UserStates.REPLY_TO_ADMIN)
+@safe_handler
+def user_send_reply_to_admin(message):
+    text = html.escape(message.text or "")
+    user = message.from_user
+    user_id = user.id
+    reply_text = (
+        f"↩️ <b>Відповідь клієнта</b>\n"
+        f"👤 <b>Клієнт:</b> <a href=\"tg://user?id={user_id}\">{html.escape(user.first_name or '')}</a>\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>\n\n"
+        f"📝 <b>Повідомлення:</b>\n{text}"
+    )
+    safe_send(config.ADMIN_ID, reply_text, parse_mode="HTML")
+    safe_send(message.chat.id, "✅ Ваша відповідь адміністратору надіслана!", parse_mode="HTML")
     set_user_state(message.from_user.id, UserStates.IDLE)
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
@@ -415,10 +437,13 @@ def admin_reply_to_selected_user(message):
     try:
         incr_stat("admin_replies")
         logger.info(f"Admin {admin_id} replies to user {user_id}: {message.text[:60]}")
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data="user_reply_to_admin"))
         safe_send(
-            user_id, 
-            Messages.ADMIN_REPLY.format(html.escape(message.text or "")), 
-            parse_mode='HTML'
+            user_id,
+            Messages.ADMIN_REPLY.format(html.escape(message.text or "")),
+            parse_mode='HTML',
+            reply_markup=markup
         )
         safe_send(admin_id, "✅ Відповідь відправлено користувачу.", parse_mode="HTML")
     except Exception as e:
@@ -591,8 +616,8 @@ def webhook():
 
 def run_flask():
     app.run(
-        host='0.0.0.0', 
-        port=config.WEBHOOK_PORT, 
+        host='0.0.0.0',
+        port=config.WEBHOOK_PORT,
         debug=False,
         threaded=True
     )
