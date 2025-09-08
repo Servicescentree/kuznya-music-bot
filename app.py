@@ -1,12 +1,9 @@
-"""
-Kuznya Music Studio Telegram Bot - Enhanced Dialog & Admin System
-Version: 3.0 | Render/In-Memory | Telebot
-"""
-
 import os
 import time
 import html
 import logging
+import random
+import string
 from threading import Thread
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
@@ -18,13 +15,14 @@ from flask import Flask, jsonify
 # === CONFIGURATION ===
 @dataclass
 class BotConfig:
-    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAFPu81rvI7ISpmtixdgD1cOybAQ6T_rMjI')
+    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAF094UtSmRBYB98JUtVwYHzREuVicQFIOs')
     ADMIN_ID: int = int(os.getenv('ADMIN_ID', '7276479457'))
     CHANNEL_URL: str = 'https://t.me/kuznya_music'
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
     WEBHOOK_PORT: int = int(os.getenv('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
     RATE_LIMIT_MESSAGES: int = 5
+
 
 # === TEXTS ===
 class Messages:
@@ -701,3 +699,4 @@ if __name__ == "__main__":
         except:
             pass
         exit(1)
+
