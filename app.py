@@ -375,6 +375,7 @@ def admin_reply_to_selected_user(message):
     try:
         incr_stat("admin_replies")
         logger.info(f"Admin {admin_id} replies to user {user_id}: {message.text[:60]}")
+        # ВАЖЛИВО! Екрануємо текст адміна через escape_markdown
         safe_send(user_id, Messages.ADMIN_REPLY.format(escape_markdown(message.text)), parse_mode='Markdown')
         safe_send(admin_id, "✅ Відповідь відправлено користувачу.")
     except Exception as e:
@@ -416,13 +417,14 @@ def admin_broadcast_start(message):
 @safe_handler
 def admin_broadcast_process(message):
     clear_admin_state(message.from_user.id)
-    text = message.text
+    # Екрануємо повідомлення розсилки для HTML!
+    text = html.escape(message.text)
     users = get_all_user_ids()
     delivered = 0
     errors = 0
     for i, uid in enumerate(users, start=1):
         try:
-            bot.send_message(uid, f"📢 <b>Оголошення:</b>\n\n{html.escape(text)}", parse_mode="HTML")
+            bot.send_message(uid, f"📢 <b>Оголошення:</b>\n\n{text}", parse_mode="HTML")
             delivered += 1
         except Exception as e:
             errors += 1
