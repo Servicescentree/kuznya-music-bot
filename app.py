@@ -33,43 +33,34 @@ class BotConfig:
 
 # -------- TEXTS --------
 class Messages:
-    WELCOME = """Привіт, {}! 👋
-Ласкаво просимо до музичної студії Kuznya Music!
-
+    WELCOME = """Привіт, <b>{}</b>! 👋<br>
+Ласкаво просимо до музичної студії Kuznya Music!<br>
 Оберіть дію з меню:"""
-    RECORDING_PROMPT = """🎤 *Запис треку*
-
-Опишіть ваші побажання:
-• Запис, Зведення
-• Аранжування 
-• Референси (приклади)
-• Терміни (коли хочете записатись)
-
-_Ваше повідомлення буде передано адміністратору_"""
-    EXAMPLES_INFO = """🎵 *Наші роботи:*
-
-Послухати приклади можна тут:
-{}
-
+    RECORDING_PROMPT = """🎤 <b>Запис треку</b><br><br>
+Опишіть ваші побажання:<br>
+• Запис, Зведення<br>
+• Аранжування <br>
+• Референси (приклади)<br>
+• Терміни (коли хочете записатись)<br><br>
+<i>Ваше повідомлення буде передано адміністратору</i>"""
+    EXAMPLES_INFO = """🎵 <b>Наші роботи:</b><br><br>
+Послухати приклади можна тут:<br>
+<a href="{}">{}</a><br><br>
 Тут ви знайдете найкращі зразки нашої творчості!"""
-    CHANNEL_INFO = """📢 *Підписуйтесь на наш канал:*
-
-{}
-
-Там ви знайдете:
-• Нові роботи
-• Закулісся студії
+    CHANNEL_INFO = """📢 <b>Підписуйтесь на наш канал:</b><br><br>
+<a href="{}">{}</a><br><br>
+Там ви знайдете:<br>
+• Нові роботи<br>
+• Закулісся студії<br>
 • Акції та знижки"""
-    CONTACTS_INFO = """📲 *Контакти студії:*
-
-Telegram: @kuznya_music
+    CONTACTS_INFO = """📲 <b>Контакти студії:</b><br><br>
+Telegram: @kuznya_music<br>
 Або використовуйте кнопку '🎤 Записати трек' для прямого зв'язку"""
-    MESSAGE_SENT = """✅ Повідомлення відправлено адміністратору!
-Очікуйте відповіді...
-
-_Ви можете відправити додаткові повідомлення або завершити діалог_"""
+    MESSAGE_SENT = """✅ Повідомлення відправлено адміністратору!<br>
+Очікуйте відповіді...<br><br>
+<i>Ви можете відправити додаткові повідомлення або завершити діалог</i>"""
     DIALOG_ENDED = "✅ Діалог завершено. Повертаємося до головного меню."
-    ADMIN_REPLY = "💬 *Відповідь від адміністратора:*\n\n{}"
+    ADMIN_REPLY = "💬 <b>Відповідь від адміністратора:</b><br><br>{}"
     USE_MENU_BUTTONS = "🤔 Використовуйте кнопки меню для навігації"
     ERROR_SEND_FAILED = "❌ Помилка при відправці повідомлення. Спробуйте пізніше."
     ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {BotConfig.MAX_MESSAGE_LENGTH} символів."
@@ -95,15 +86,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# -------- MARKDOWN ESCAPE --------
-try:
-    from telebot.util import escape_markdown
-except ImportError:
-    def escape_markdown(text):
-        for c in ('_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'):
-            text = text.replace(c, f'\\{c}')
-        return text
-
 # -------- ERROR HANDLING DECORATOR --------
 def safe_handler(func):
     def wrapper(message, *args, **kwargs):
@@ -112,7 +94,7 @@ def safe_handler(func):
         except Exception as e:
             logger.error(f"Handler error in {func.__name__}: {e}", exc_info=True)
             try:
-                bot.send_message(message.chat.id, "❌ Виникла технічна помилка, спробуйте ще раз або пізніше.")
+                bot.send_message(message.chat.id, "❌ Виникла технічна помилка, спробуйте ще раз або пізніше.", parse_mode="HTML")
             except Exception:
                 pass
     return wrapper
@@ -137,15 +119,6 @@ logger.info("Bot started (main entrypoint).")
 # -------- UTILS --------
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(config.ADMIN_ID)
-
-def get_user_info(user) -> Dict[str, Any]:
-    return {
-        'id': user.id,
-        'username': user.username or "Без username",
-        'first_name': user.first_name or "Невідомо",
-        'last_name': user.last_name or "",
-        'full_name': f"{user.first_name or ''} {user.last_name or ''}".strip()
-    }
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
@@ -248,7 +221,7 @@ def clear_admin_reply_target(admin_id: int):
 def send_user_request_to_admin(user_id, text):
     try:
         logger.info(f"User request sent to admin: user_id={user_id}, text={text[:60]}")
-        safe_send(config.ADMIN_ID, f"Нова заявка від користувача {user_id}:\n{html.escape(text)}")
+        safe_send(config.ADMIN_ID, f"Нова заявка від користувача {user_id}:<br>{html.escape(text)}", parse_mode="HTML")
     except Exception as e:
         logger.error(f"Failed to send user request to admin: {e}", exc_info=True)
 
@@ -293,43 +266,58 @@ def handle_start(message):
     logger.info(f"User started: id={message.from_user.id}, name={message.from_user.first_name} @{message.from_user.username}")
     safe_send(
         message.chat.id,
-        Messages.WELCOME.format(html.escape(message.from_user.first_name)),
+        Messages.WELCOME.format(html.escape(message.from_user.first_name or "")),
+        parse_mode="HTML",
         reply_markup=get_main_keyboard()
     )
 
 @bot.message_handler(func=lambda m: m.text == "🎧 Приклади робіт")
 @safe_handler
 def handle_examples(message):
-    safe_send(message.chat.id, Messages.EXAMPLES_INFO.format(config.EXAMPLES_URL), parse_mode="Markdown")
+    safe_send(
+        message.chat.id, 
+        Messages.EXAMPLES_INFO.format(
+            html.escape(config.EXAMPLES_URL), 
+            html.escape(config.EXAMPLES_URL)
+        ),
+        parse_mode="HTML"
+    )
 
 @bot.message_handler(func=lambda m: m.text == "📢 Підписатися")
 @safe_handler
 def handle_channel(message):
-    safe_send(message.chat.id, Messages.CHANNEL_INFO.format(config.CHANNEL_URL), parse_mode="Markdown")
+    safe_send(
+        message.chat.id, 
+        Messages.CHANNEL_INFO.format(
+            html.escape(config.CHANNEL_URL), 
+            html.escape(config.CHANNEL_URL)
+        ),
+        parse_mode="HTML"
+    )
 
 @bot.message_handler(func=lambda m: m.text == "📲 Контакти")
 @safe_handler
 def handle_contacts(message):
-    safe_send(message.chat.id, Messages.CONTACTS_INFO, parse_mode="Markdown")
+    safe_send(message.chat.id, Messages.CONTACTS_INFO, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: m.text == "🎤 Записати трек")
 @safe_handler
 def handle_record(message):
-    safe_send(message.chat.id, Messages.RECORDING_PROMPT, parse_mode="Markdown")
+    safe_send(message.chat.id, Messages.RECORDING_PROMPT, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: m.text and m.text.lower().startswith("запис"))
 @safe_handler
 def handle_user_request(message):
     incr_stat("user_requests")
     send_user_request_to_admin(message.from_user.id, message.text)
-    safe_send(message.chat.id, Messages.MESSAGE_SENT)
+    safe_send(message.chat.id, Messages.MESSAGE_SENT, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
 @safe_handler
 def admin_show_users(message):
     user_ids = get_all_user_ids()
     if not user_ids:
-        safe_send(message.chat.id, "Немає користувачів.")
+        safe_send(message.chat.id, "Немає користувачів.", parse_mode="HTML")
         return
     markup = types.InlineKeyboardMarkup()
     for uid in user_ids:
@@ -341,7 +329,7 @@ def admin_show_users(message):
         markup.add(types.InlineKeyboardButton(
             text=f"{info} (id:{uid})", callback_data=f"admin_reply_{uid}"
         ))
-    safe_send(message.chat.id, "Оберіть користувача для відповіді:", reply_markup=markup)
+    safe_send(message.chat.id, "Оберіть користувача для відповіді:", reply_markup=markup, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_reply_"))
 def admin_select_user_for_reply(call):
@@ -349,10 +337,10 @@ def admin_select_user_for_reply(call):
     try:
         user_id = int(call.data.replace("admin_reply_", ""))
         set_admin_reply_target(admin_id, user_id)
-        safe_send(admin_id, f"Ви обрали користувача id: {user_id}. Введіть відповідь для нього.")
+        safe_send(admin_id, f"Ви обрали користувача id: {user_id}. Введіть відповідь для нього.", parse_mode="HTML")
     except Exception as e:
         logger.error(f"Callback error in admin_select_user_for_reply: {e}", exc_info=True)
-        safe_send(admin_id, "❌ Трапилась помилка при виборі користувача.")
+        safe_send(admin_id, "❌ Трапилась помилка при виборі користувача.", parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_admin_reply_target(m.from_user.id))
 @safe_handler
@@ -362,12 +350,15 @@ def admin_reply_to_selected_user(message):
     try:
         incr_stat("admin_replies")
         logger.info(f"Admin {admin_id} replies to user {user_id}: {message.text[:60]}")
-        # ESCAPE MARKDOWN для відповіді!
-        safe_send(user_id, Messages.ADMIN_REPLY.format(escape_markdown(message.text)), parse_mode='Markdown')
-        safe_send(admin_id, "✅ Відповідь відправлено користувачу.")
+        safe_send(
+            user_id, 
+            Messages.ADMIN_REPLY.format(html.escape(message.text or "")), 
+            parse_mode='HTML'
+        )
+        safe_send(admin_id, "✅ Відповідь відправлено користувачу.", parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error sending reply from admin to user: {e}", exc_info=True)
-        safe_send(admin_id, f"❌ Не вдалося відправити відповідь: {e}")
+        safe_send(admin_id, f"❌ Не вдалося відправити відповідь: {e}", parse_mode="HTML")
     clear_admin_reply_target(admin_id)
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
@@ -383,12 +374,12 @@ def admin_stats(message):
     start_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))
 
     msg = (
-        f"📊 <b>Статистика бота</b>\n\n"
-        f"👥 Унікальних користувачів: <b>{total_users}</b>\n"
-        f"📨 Заявок від юзерів: <b>{user_requests}</b>\n"
-        f"💬 Відповідей адміна: <b>{admin_replies}</b>\n"
-        f"🟢 Активних чатів: <b>{active_chats}</b>\n"
-        f"⏱ Аптайм: <b>{uptime_hours} год {uptime_minutes} хв</b>\n"
+        f"📊 <b>Статистика бота</b><br><br>"
+        f"👥 Унікальних користувачів: <b>{total_users}</b><br>"
+        f"📨 Заявок від юзерів: <b>{user_requests}</b><br>"
+        f"💬 Відповідей адміна: <b>{admin_replies}</b><br>"
+        f"🟢 Активних чатів: <b>{active_chats}</b><br>"
+        f"⏱ Аптайм: <b>{uptime_hours} год {uptime_minutes} хв</b><br>"
         f"🚀 Останній рестарт: <b>{start_time_str}</b>"
     )
     safe_send(message.chat.id, msg, parse_mode="HTML")
@@ -397,19 +388,19 @@ def admin_stats(message):
 @safe_handler
 def admin_broadcast_start(message):
     set_admin_state(message.from_user.id, BROADCAST_STATE)
-    safe_send(message.chat.id, "Введіть текст розсилки, який буде надіслано всім користувачам:")
+    safe_send(message.chat.id, "Введіть текст розсилки, який буде надіслано всім користувачам:", parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_admin_state(m.from_user.id) == BROADCAST_STATE)
 @safe_handler
 def admin_broadcast_process(message):
     clear_admin_state(message.from_user.id)
-    text = html.escape(message.text)
+    text = html.escape(message.text or "")
     users = get_all_user_ids()
     delivered = 0
     errors = 0
     for i, uid in enumerate(users, start=1):
         try:
-            bot.send_message(uid, f"📢 <b>Оголошення:</b>\n\n{text}", parse_mode="HTML")
+            bot.send_message(uid, f"📢 <b>Оголошення:</b><br><br>{text}", parse_mode="HTML")
             delivered += 1
         except Exception as e:
             errors += 1
@@ -418,8 +409,8 @@ def admin_broadcast_process(message):
             time.sleep(0.5)
         else:
             time.sleep(0.12)
-    safe_send(message.chat.id, f"Розсилка завершена!\n\n"
-                               f"Успішно доставлено: <b>{delivered}</b>\n"
+    safe_send(message.chat.id, f"Розсилка завершена!<br><br>"
+                               f"Успішно доставлено: <b>{delivered}</b><br>"
                                f"Помилок: <b>{errors}</b>", parse_mode="HTML")
     logger.info(f"BROADCAST: sent={delivered}, errors={errors}, total={len(users)}")
 
@@ -431,14 +422,16 @@ def handle_other_messages(message):
         safe_send(
             message.chat.id,
             Messages.USE_MENU_BUTTONS,
-            reply_markup=markup
+            reply_markup=markup,
+            parse_mode="HTML"
         )
     else:
         markup = get_main_keyboard()
         safe_send(
             message.chat.id,
             Messages.USE_MENU_BUTTONS,
-            reply_markup=markup
+            reply_markup=markup,
+            parse_mode="HTML"
         )
 
 # -------- FLASK & SELF-PING --------
