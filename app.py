@@ -1,8 +1,3 @@
-"""
-Kuznya Music Studio Telegram Bot - Enhanced Dialog & Admin System + реферальна програма
-Version: 3.1 | Render/In-Memory | Telebot
-"""
-
 import os
 import time
 import html
@@ -17,6 +12,8 @@ import telebot
 from telebot import types
 from flask import Flask, jsonify
 
+import requests  # <-- для self-ping
+
 # === CONFIGURATION ===
 @dataclass
 class BotConfig:
@@ -27,21 +24,6 @@ class BotConfig:
     WEBHOOK_PORT: int = int(os.getenv('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
     RATE_LIMIT_MESSAGES: int = 5
-
-# === FLASK HEALTH ENDPOINT ===
-app = Flask(__name__)
-
-@app.route('/ping', methods=['GET', 'HEAD'])
-def ping():
-    return '', 200
-
-def run_flask():
-    app.run(
-        host='0.0.0.0',
-        port=config.WEBHOOK_PORT,
-        debug=False,
-        threaded=True
-    )
 
 # === TEXTS ===
 class Messages:
@@ -62,27 +44,20 @@ class Messages:
     BROADCAST_PROMPT = "📢 Введіть текст для розсилки всім користувачам або натисніть '❌ Скасувати'"
     BROADCAST_DONE = "📊 Розсилка завершена!"
     BROADCAST_CANCELLED = "❌ Розсилка скасована."
-    SHARE_BOT = "🎉 Запроси друга у музичний бот!\nПросто поділись цим посиланням:\n{}\n\nЗа кожного друга — бонус чи знижка!\nЯкщо запросиш 3 друзів — отримаєш промокод на знижку 25% на запис!"
-    BONUS_PROMO = "🎁 Ваш промокод на знижку 25%: {}\nПокажіть цей код адміністратору при записі!"
-    NO_PROMO = "У вас ще немає промокоду. Запросіть 3 друзів та отримайте знижку!"
-    FRIEND_JOINED = "🎉 Ваш друг {} приєднався за вашим реферальним посиланням! Дякуємо!"
-    PROMO_ACHIEVED = "🎉 Вітаємо! Ви запросили 3 друзів і отримали промокод на знижку 25% — {}\nПокажіть цей код адміністратору при записі."
 
-# === ENHANCED DIALOG MANAGER + REFERRALS ===
+# === ENHANCED DIALOG MANAGER ===
 class EnhancedDialogManager:
     def __init__(self):
-        self.active_dialogs = {}  # user_id -> {admin_id, started_at, message_count, dialog_id}
-        self.admin_current_dialog = {}  # admin_id -> user_id
-        self.message_history = {}  # dialog_id -> [{'user_id', 'message', 'timestamp', 'is_admin'}]
-        self.users = {}  # user_id -> {...}
-        self.user_states = {}  # user_id -> state
+        self.active_dialogs = {}
+        self.admin_current_dialog = {}
+        self.message_history = {}
+        self.users = {}
+        self.user_states = {}
         self.stats = {
             'total_messages': 0,
             'total_dialogs': 0,
             'bot_start_time': time.time()
         }
-        self.referrals = {}  # referrer_id -> set(new_user_ids)
-        self.promo_codes = {}  # user_id -> promo_code
         self.admin_broadcast_mode = False
         self.broadcast_text = ""
 
@@ -195,24 +170,6 @@ class EnhancedDialogManager:
             'users_in_dialog': len([u for u in self.users.keys() if self.is_user_in_dialog(u)])
         }
 
-    # --- Referral & Promocode ---
-    def add_referral(self, referrer_id, new_user_id):
-        if referrer_id == new_user_id:
-            return None
-        self.referrals.setdefault(referrer_id, set()).add(new_user_id)
-        # Generate promo code if 3 unique invited
-        if len(self.referrals[referrer_id]) == 3 and referrer_id not in self.promo_codes:
-            code = self.generate_promo_code()
-            self.promo_codes[referrer_id] = code
-            return code
-        return None
-
-    def generate_promo_code(self, length=8):
-        return 'KUZNYA25-' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
-
-    def get_promo_code(self, user_id):
-        return self.promo_codes.get(user_id)
-
 # === KEYBOARDS ===
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
@@ -224,10 +181,7 @@ def get_main_keyboard():
         types.KeyboardButton("📢 Підписатися"),
         types.KeyboardButton("📲 Контакти")
     )
-    markup.add(
-        types.KeyboardButton("ℹ️ Про студію"),
-        types.KeyboardButton("🔗 Поділитись ботом")  # Новинка!
-    )
+    markup.add(types.KeyboardButton("ℹ️ Про студію"))
     return markup
 
 def get_dialog_keyboard():
@@ -274,6 +228,11 @@ logger = logging.getLogger(__name__)
 config = BotConfig()
 dialog_manager = EnhancedDialogManager()
 
+# === BOT INIT ===
+if not config.TOKEN or not config.ADMIN_ID:
+    logger.error("BOT_TOKEN or ADMIN_ID not set")
+    exit(1)
+
 bot = telebot.TeleBot(config.TOKEN)
 
 def is_admin(user_id): return user_id == config.ADMIN_ID
@@ -289,82 +248,54 @@ def get_user_info(user):
 
 def sanitize_input(text): return html.escape(text.strip())
 
-# === REFERRAL HANDLERS ===
+# === MESSAGE HANDLERS ===
+# ... (тут залишаєш усі свої обробники, як раніше)
 
-@bot.message_handler(func=lambda m: m.text == "🔗 Поділитись ботом")
-def handle_share_bot(message):
-    user_id = message.from_user.id
-    referral_link = f"https://t.me/{bot.get_me().username}?start=ref{user_id}"
-    text = Messages.SHARE_BOT.format(referral_link)
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("Поділитись ботом", url=referral_link))
-    bot.send_message(
-        user_id,
-        text,
-        reply_markup=markup
+# === FLASK HEALTH ===
+app = Flask(__name__)
+bot_start_time = time.time()
+
+@app.route('/')
+def health_check():
+    uptime_seconds = int(time.time() - bot_start_time)
+    uptime_hours = uptime_seconds // 3600
+    uptime_minutes = (uptime_seconds % 3600) // 60
+    return f"""
+    <h1>🎵 Kuznya Music Studio Bot</h1>
+    <p><strong>Статус:</strong> ✅ Активний</p>
+    <p><strong>Uptime:</strong> {uptime_hours}год {uptime_minutes}хв</p>
+    <p><strong>Час запуску:</strong> {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))}</p>
+    <p><strong>Поточний час:</strong> {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
+    <p><strong>Користувачів:</strong> {len(dialog_manager.users)}</p>
+    """
+
+@app.route('/keepalive')
+def keep_alive():
+    return jsonify({
+        "message": "Bot is alive!",
+        "timestamp": time.time(),
+        "uptime": int(time.time() - bot_start_time)
+    })
+
+def run_flask():
+    app.run(
+        host='0.0.0.0',
+        port=config.WEBHOOK_PORT,
+        debug=False,
+        threaded=True
     )
 
-@bot.message_handler(commands=['promocode'])
-def handle_promocode(message):
-    user_id = message.from_user.id
-    code = dialog_manager.get_promo_code(user_id)
-    if code:
-        bot.send_message(
-            user_id,
-            Messages.BONUS_PROMO.format(code)
-        )
-    else:
-        bot.send_message(
-            user_id,
-            Messages.NO_PROMO
-        )
-
-# === START HANDLER (з рефералами) ===
-@bot.message_handler(commands=['start'])
-def handle_start(message):
-    user_info = get_user_info(message.from_user)
-    args = message.text.split(' ', 1)
-    # Referral logic
-    if len(args) > 1 and args[1].startswith('ref'):
-        referrer_id = int(args[1][3:])
-        if referrer_id != user_info['id']:
-            dialog_manager.save_user(user_info['id'], user_info['username'], user_info['full_name'])
-            promo = dialog_manager.add_referral(referrer_id, user_info['id'])
-            if promo:
-                bot.send_message(
-                    referrer_id,
-                    Messages.PROMO_ACHIEVED.format(promo)
-                )
-            bot.send_message(
-                referrer_id,
-                Messages.FRIEND_JOINED.format(user_info['full_name'])
-            )
-    # Далі стандартна логіка старту
-    dialog_manager.save_user(user_info['id'], user_info['username'], user_info['full_name'])
-    if is_admin(user_info['id']):
-        markup = get_admin_main_keyboard(dialog_manager)
-        stats = dialog_manager.get_statistics()
-        bot.send_message(
-            user_info['id'],
-            f"{Messages.ADMIN_PANEL}\n\nАктивних діалогів: {stats['active_dialogs']}\nКористувачів: {stats['total_users']}\nПовідомлень: {stats['total_messages']}",
-            reply_markup=markup,
-            parse_mode="HTML"
-        )
-    else:
-        if dialog_manager.is_user_in_dialog(user_info['id']):
-            markup = get_dialog_keyboard()
-            bot.send_message(
-                user_info['id'],
-                "💬 Ви повернулись у діалог з адміністратором.\nПишіть повідомлення!",
-                reply_markup=markup
-            )
-        else:
-            markup = get_main_keyboard()
-            bot.send_message(
-                user_info['id'],
-                Messages.WELCOME.format(user_info['first_name']),
-                reply_markup=markup
-            )
+# === ПРОСТИЙ SELF-PING БЕЗ ENV ===
+def self_ping():
+    port = config.WEBHOOK_PORT
+    url = f"http://localhost:{port}/keepalive"
+    while True:
+        try:
+            r = requests.get(url, timeout=10)
+            print(f"[SELF-PING] Pinged {url} ({r.status_code})")
+        except Exception as e:
+            print(f"[SELF-PING] Error pinging {url}: {e}")
+        time.sleep(300)  # 5 хвилин
 
 # === MAIN EXECUTION ===
 if __name__ == "__main__":
@@ -373,8 +304,15 @@ if __name__ == "__main__":
         flask_thread = Thread(target=run_flask, daemon=True)
         flask_thread.start()
         logger.info(f"Flask server started on port {config.WEBHOOK_PORT}")
+
+        # --- Self-ping запускаємо окремим потоком ---
+        selfping_thread = Thread(target=self_ping, daemon=True)
+        selfping_thread.start()
+        logger.info("Self-ping thread started.")
+
         time.sleep(2)
         bot.polling(none_stop=True, interval=1, timeout=30)
+
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
         try:
