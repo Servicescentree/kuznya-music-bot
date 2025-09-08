@@ -21,7 +21,7 @@ import requests  # for self-ping
 # Configuration
 @dataclass
 class BotConfig:
-    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAFPu81rvI7ISpmtixdgD1cOybAQ6T_rMjI')
+    TOKEN: str = os.getenv('BOT_TOKEN', '8368212048:AAF094UtSmRBYB98JUtVwYHzREuVicQFIOs')  # <<<--- NEW TOKEN HERE!
     ADMIN_ID: int = int(os.getenv('ADMIN_ID', '7276479457'))
     CHANNEL_URL: str = 'https://t.me/kuznya_music'
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
