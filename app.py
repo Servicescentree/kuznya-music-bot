@@ -402,4 +402,159 @@ def user_reply_to_admin(message):
     safe_send(message.chat.id, "✅ Ваша відповідь адміністратору надіслана!", parse_mode="HTML")
     set_user_state(user_id, UserStates.IDLE)
 
-# ... решта коду (admin panel, broadcast, stats, flask, keepalive, webhook, main) без змін ...
+@bot.message_handler(func=lambda message: True)
+@safe_handler
+def handle_other_messages(message):
+    # Не показуємо підказку, якщо тільки-но була відповідь адміну/користувачу
+    if get_user_state(message.from_user.id) in [UserStates.REPLY_TO_ADMIN, UserStates.REPLY_TO_USER]:
+        return
+    if is_admin(message.from_user.id):
+        safe_send(
+            message.chat.id,
+            Messages.ADMIN_MENU_NAV,
+            reply_markup=get_admin_keyboard(),
+            parse_mode="HTML"
+        )
+    else:
+        safe_send(
+            message.chat.id,
+            Messages.USE_MENU_BUTTONS,
+            reply_markup=get_main_keyboard(),
+            parse_mode="HTML"
+        )
+
+# -------- FLASK & SELF-PING --------
+app = Flask(__name__)
+bot_start_time = time.time()
+
+@app.route('/')
+def health_check():
+    try:
+        uptime_seconds = int(time.time() - bot_start_time)
+        uptime_hours = uptime_seconds // 3600
+        uptime_minutes = (uptime_seconds % 3600) // 60
+        return f"""
+        <h1>🎵 Kuznya Music Studio Bot</h1>
+        <p><strong>Статус:</strong> ✅ Активний</p>
+        <p><strong>Uptime:</strong> {uptime_hours}год {uptime_minutes}хв</p>
+        <p><strong>Час запуску:</strong> {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))}</p>
+        <p><strong>Поточний час:</strong> {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
+        <p><strong>Користувачів:</strong> {len(get_all_user_ids())}</p>
+        """
+    except Exception as e:
+        logger.error(f"Health page error: {e}", exc_info=True)
+        return "<h1>Internal Error</h1>", 500
+
+@app.route('/health')
+def health():
+    try:
+        bot_info = bot.get_me()
+        return jsonify({
+            "status": "healthy",
+            "timestamp": time.time(),
+            "uptime_seconds": int(time.time() - bot_start_time),
+            "bot_username": bot_info.username,
+            "total_users": len(get_all_user_ids()),
+            "version": "3.0-admin-panel-redis"
+        }), 200
+    except Exception as e:
+        logger.error(f"Health check failed: {e}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
+
+@app.route('/ping')
+def ping():
+    return "pong", 200
+
+@app.route('/status')
+def status():
+    try:
+        active_users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
+        return jsonify({
+            "bot_status": "running",
+            "uptime_seconds": int(time.time() - bot_start_time),
+            "total_users": len(get_all_user_ids()),
+            "active_chats": len(active_users),
+            "admin_id": config.ADMIN_ID,
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.error(f"Status check failed: {e}", exc_info=True)
+        return jsonify({
+            "bot_status": "error",
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
+
+@app.route('/keepalive')
+def keep_alive():
+    try:
+        return jsonify({
+            "message": "Bot is alive!",
+            "timestamp": time.time(),
+            "uptime": int(time.time() - bot_start_time)
+        })
+    except Exception as e:
+        logger.error(f"/keepalive error: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route(f"/bot{config.TOKEN}", methods=["POST"])
+def webhook():
+    if request.headers.get("content-type") == "application/json":
+        try:
+            json_string = request.get_data().decode("utf-8")
+            update = telebot.types.Update.de_json(json_string)
+            bot.process_new_updates([update])
+            return "", 200
+        except Exception as e:
+            logger.error(f"Webhook processing error: {e}", exc_info=True)
+            return "", 500
+    else:
+        return "", 403
+
+def run_flask():
+    app.run(
+        host='0.0.0.0',
+        port=config.WEBHOOK_PORT,
+        debug=False,
+        threaded=True
+    )
+
+def self_ping():
+    url = f"{config.WEBHOOK_URL}/keepalive"
+    while True:
+        try:
+            r2 = requests.get(url, timeout=10)
+            print(f"[SELF-PING] Pinged {url} ({r2.status_code})")
+        except Exception as e:
+            print(f"[SELF-PING] Error pinging {url}: {e}")
+        time.sleep(300)
+
+if __name__ == "__main__":
+    try:
+        logger.info("Starting Kuznya Music Studio Bot...")
+        bot.remove_webhook()
+        time.sleep(1)
+        set_url = f"{config.WEBHOOK_URL}/bot{config.TOKEN}"
+        webhook_result = bot.set_webhook(url=set_url)
+        if webhook_result:
+            logger.info(f"Webhook set: {set_url}")
+        else:
+            logger.warning("Webhook not set!")
+        flask_thread = Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        selfping_thread = Thread(target=self_ping, daemon=True)
+        selfping_thread.start()
+        logger.info("🎵 Music Studio Bot started successfully!")
+        logger.info(f"Admin ID: {config.ADMIN_ID}")
+        logger.info("Bot is running via webhook. No polling!")
+        while True:
+            time.sleep(60)
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.critical(f"Critical error: {e}", exc_info=True)
+        exit(1)
