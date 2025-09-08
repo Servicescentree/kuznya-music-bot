@@ -233,13 +233,6 @@ def clear_admin_reply_target(admin_id: int):
     except Exception as e:
         logger.error(f"Redis error in clear_admin_reply_target: {e}", exc_info=True)
 
-def send_user_request_to_admin(user_id, text):
-    try:
-        logger.info(f"User request sent to admin: user_id={user_id}, text={text[:60]}")
-        safe_send(config.ADMIN_ID, f"Нова заявка від користувача {user_id}:\n{html.escape(text)}", parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Failed to send user request to admin: {e}", exc_info=True)
-
 def incr_stat(key):
     try:
         r.incr(f"stat:{key}")
@@ -271,6 +264,21 @@ def clear_admin_state(user_id):
         r.delete(f"admin:{user_id}:state")
     except Exception as e:
         logger.error(f"Redis error in clear_admin_state: {e}", exc_info=True)
+
+def format_admin_request(user, user_id, message_text, dt):
+    tg_username = f"@{user.username}" if user.username else ""
+    name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+    profile_link = f'<a href="tg://user?id={user_id}">{html.escape(name)}</a>'
+    username_link = f" (<a href=\"https://t.me/{user.username}\">{tg_username}</a>)" if user.username else ""
+    time_str = dt.strftime("%H:%M %d.%m.%Y")
+    return (
+        "💬 <b>Нове повідомлення від клієнта</b>\n\n"
+        f"👤 <b>Клієнт:</b> {profile_link}{username_link}\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+        f"⏰ <b>Час:</b> <code>{time_str}</code>\n\n"
+        "📝 <b>Повідомлення:</b>\n"
+        f"{html.escape(message_text)}"
+    )
 
 # -------- HANDLERS --------
 
@@ -329,7 +337,13 @@ def handle_user_request(message):
         safe_send(message.chat.id, err, parse_mode="HTML")
         return
     incr_stat("user_requests")
-    send_user_request_to_admin(message.from_user.id, message.text)
+    user = message.from_user
+    user_id = user.id
+    dt = time.localtime()
+    msg = format_admin_request(user, user_id, message.text, time.localtime())
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("✍️ Відповісти", callback_data=f"admin_reply_{user_id}"))
+    safe_send(config.ADMIN_ID, msg, parse_mode="HTML", reply_markup=markup)
     safe_send(message.chat.id, Messages.MESSAGE_SENT, parse_mode="HTML")
     set_user_state(message.from_user.id, UserStates.IDLE)
 
