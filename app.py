@@ -4,7 +4,6 @@ import html
 import logging
 from threading import Thread
 from dataclasses import dataclass
-from typing import Dict, Any
 
 import telebot
 from telebot import types
@@ -75,24 +74,19 @@ class Messages:
         "Очікуйте відповіді...\n\n"
         "<i>Ви можете відправити додаткові повідомлення або завершити діалог</i>"
     )
-    DIALOG_ENDED = "✅ Діалог завершено. Повертаємося до головного меню."
     ADMIN_REPLY = "💬 <b>Відповідь від адміністратора:</b>\n\n{}"
     USE_MENU_BUTTONS = "🤔 Використовуйте кнопки меню для навігації"
     ERROR_SEND_FAILED = "❌ Помилка при відправці повідомлення. Спробуйте пізніше."
     ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {config.MAX_MESSAGE_LENGTH} символів."
     ERROR_RATE_LIMITED = "❌ Забагато повідомлень. Зачекайте хвилинку."
     ERROR_INVALID_INPUT = "❌ Некоректне повідомлення. Спробуйте ще раз."
-    ADMIN_PANEL_WELCOME = (
-        "👑 Вітаємо в адмін-панелі Kuznya Music!\n"
-        "Оберіть дію з меню:"
-    )
+    ADMIN_PANEL_WELCOME = "👑 Вітаємо в адмін-панелі Kuznya Music!\nОберіть дію з меню:"
     ADMIN_MENU_NAV = "👑 Ви в адмін-панелі. Скористайтеся кнопками меню:"
 
 # -------- STATES --------
 class UserStates:
     IDLE = 'idle'
     WAITING_FOR_MESSAGE = 'waiting_for_message'
-    ADMIN_REPLYING = 'admin_replying'
 
 BROADCAST_STATE = 'waiting_for_broadcast_message'
 
@@ -107,7 +101,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# -------- ERROR HANDLING DECORATOR --------
 def safe_handler(func):
     def wrapper(message, *args, **kwargs):
         try:
@@ -126,7 +119,6 @@ def safe_send(chat_id, text, **kwargs):
     except Exception as e:
         logger.error(f"Telegram send_message error: {e}", exc_info=True)
 
-# -------- BOT SETUP --------
 bot = telebot.TeleBot(config.TOKEN)
 try:
     bot_info = bot.get_me()
@@ -136,7 +128,6 @@ except Exception as token_error:
     exit(1)
 logger.info("Bot started (main entrypoint).")
 
-# -------- UTILS --------
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(config.ADMIN_ID)
 
@@ -164,7 +155,7 @@ def get_admin_keyboard():
     )
     return markup
 
-def validate_message(message) -> tuple[bool, str]:
+def validate_message(message):
     if not message or not message.text:
         return False, Messages.ERROR_INVALID_INPUT
     if len(message.text) > config.MAX_MESSAGE_LENGTH:
@@ -285,7 +276,7 @@ def format_admin_request(user, user_id, message_text, dt):
         f"{html.escape(message_text)}"
     )
 
-# -------- HANDLERS --------
+# -------- HANDLЕРИ --------
 
 @bot.message_handler(commands=["start"])
 @safe_handler
