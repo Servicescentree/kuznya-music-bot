@@ -506,24 +506,16 @@ def handle_admin_broadcast(message):
 @safe_handler
 def handle_admin_broadcast_text(message):
     users = [uid for uid in get_all_user_ids() if uid != config.ADMIN_ID]
-    sent_count = 0
-    fail_count = 0
-    total = len(users)
+    count = 0
     for uid in users:
         try:
             safe_send(uid, f"📢 <b>Оголошення від студії:</b>\n\n{message.text}", parse_mode="HTML")
-            sent_count += 1
+            count += 1
         except Exception:
-            fail_count += 1
             continue
     clear_admin_state(message.from_user.id)
-    stat_text = (
-        f"✅ Розсилку завершено!\n"
-        f"Всього користувачів: <b>{total}</b>\n"
-        f"Успішно доставлено: <b>{sent_count}</b>\n"
-        f"Помилок (можливо заблокували бота): <b>{fail_count}</b>"
-    )
-    safe_send(message.chat.id, stat_text, parse_mode="HTML", reply_markup=get_admin_keyboard())
+    safe_send(message.chat.id, f"✅ Розсилку відправлено {count} користувачам.", parse_mode="HTML", reply_markup=get_admin_keyboard())
+
 
 # --- ОНОВЛЕНИЙ CATCH-ALL ХЕНДЛЕР: легкий старт діалогу через повідомлення ---
 @bot.message_handler(func=lambda message: True)
