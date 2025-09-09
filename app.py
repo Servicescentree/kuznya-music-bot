@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import telebot
 from telebot import types
+from telebot.apihelper import ApiTelegramException
 from flask import Flask, jsonify, request
 
 import requests
@@ -76,6 +77,7 @@ class Messages:
     )
     ADMIN_REPLY = "💬 <b>Відповідь від адміністратора:</b>\n\n{}"
     ADMIN_REPLY_WITH_USER = "💬 <b>Відповідь від адміністратора:</b>\n\n<b>Кому:</b> {}\n{}"
+    ADMIN_REPLY_SENT = "✅ Відповідь відправлена!\n<b>Кому:</b> {}"
     USE_MENU_BUTTONS = "🤔 Використовуйте кнопки меню для навігації"
     ERROR_SEND_FAILED = "❌ Помилка при відправці повідомлення. Спробуйте пізніше."
     ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {config.MAX_MESSAGE_LENGTH} символів."
@@ -421,7 +423,12 @@ def admin_reply_to_user(message):
         parse_mode='HTML',
         reply_markup=markup
     )
-    safe_send(admin_id, "✅ Відповідь відправлена!", parse_mode="HTML", reply_markup=get_admin_reply_keyboard())
+    safe_send(
+        admin_id,
+        Messages.ADMIN_REPLY_SENT.format(html.escape(info)),
+        parse_mode="HTML",
+        reply_markup=get_admin_reply_keyboard()
+    )
     set_user_state(admin_id, UserStates.IDLE)
     clear_admin_reply_target(admin_id)
 
@@ -506,18 +513,32 @@ def handle_admin_broadcast(message):
 @safe_handler
 def handle_admin_broadcast_text(message):
     users = [uid for uid in get_all_user_ids() if uid != config.ADMIN_ID]
-    count = 0
+    count_delivered = 0
+    count_failed = 0
+    count_blocked = 0
     for uid in users:
         try:
             safe_send(uid, f"📢 <b>Оголошення від студії:</b>\n\n{message.text}", parse_mode="HTML")
-            count += 1
+            count_delivered += 1
+        except ApiTelegramException as e:
+            if "bot was blocked by the user" in str(e):
+                count_blocked += 1
+            else:
+                count_failed += 1
         except Exception:
-            continue
+            count_failed += 1
     clear_admin_state(message.from_user.id)
-    safe_send(message.chat.id, f"✅ Розсилку відправлено {count} користувачам.", parse_mode="HTML", reply_markup=get_admin_keyboard())
+    safe_send(
+        message.chat.id,
+        f"✅ Розсилку відправлено!\n"
+        f"Доставлено: <b>{count_delivered}</b>\n"
+        f"Не доставлено: <b>{count_failed}</b>\n"
+        f"Заблоковано: <b>{count_blocked}</b>",
+        parse_mode="HTML",
+        reply_markup=get_admin_keyboard()
+    )
 
-
-# --- ОНОВЛЕНИЙ CATCH-ALL ХЕНДЛЕР: легкий старт діалогу через повідомлення ---
+# --- ОНОВЛЕНИЙ CATCH-ALL ХЕНДЛЕР ---
 @bot.message_handler(func=lambda message: True)
 @safe_handler
 def handle_other_messages(message):
@@ -538,7 +559,6 @@ def handle_other_messages(message):
     if user_state in [UserStates.REPLY_TO_ADMIN, UserStates.REPLY_TO_USER]:
         return
 
-    # --- ПРОКАЧКА: якщо не у діалозі, але пише повідомлення — стартуємо діалог!
     if user_state != UserStates.WAITING_FOR_MESSAGE:
         set_user_state(user_id, UserStates.WAITING_FOR_MESSAGE)
         safe_send(
@@ -550,7 +570,6 @@ def handle_other_messages(message):
         handle_user_request(message)
         return
 
-    # Якщо у діалозі — бот працює як раніше (можна додати додаткову логіку тут)
     safe_send(
         message.chat.id,
         Messages.USE_MENU_BUTTONS,
