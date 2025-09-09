@@ -75,6 +75,7 @@ class Messages:
         "<i>Ви можете відправити додаткові повідомлення або завершити діалог</i>"
     )
     ADMIN_REPLY = "💬 <b>Відповідь від адміністратора:</b>\n\n{}"
+    ADMIN_REPLY_WITH_USER = "💬 <b>Відповідь від адміністратора:</b>\n\n<b>Кому:</b> {}\n{}"
     USE_MENU_BUTTONS = "🤔 Використовуйте кнопки меню для навігації"
     ERROR_SEND_FAILED = "❌ Помилка при відправці повідомлення. Спробуйте пізніше."
     ERROR_MESSAGE_TOO_LONG = f"❌ Повідомлення занадто довге. Максимум {config.MAX_MESSAGE_LENGTH} символів."
@@ -235,7 +236,7 @@ def get_admin_reply_target(admin_id: int) -> int:
         logger.error(f"Redis error in get_admin_reply_target: {e}", exc_info=True)
         return None
 
-def clear_admin_reply_target(admin_id: int):
+def clear_admin_reply_target(admin_id):
     try:
         r.delete(f"admin:{admin_id}:reply")
     except Exception as e:
@@ -290,7 +291,6 @@ def format_admin_request(user, user_id, message_text, dt):
 
 # -------- HANDLЕРИ (user/admin) --------
 
-# --- 1. Завершення діалогу користувача ---
 @bot.message_handler(func=lambda m: m.text == "❌ Завершити діалог")
 @safe_handler
 def handle_end_dialog(message):
@@ -302,7 +302,6 @@ def handle_end_dialog(message):
         reply_markup=get_main_keyboard()
     )
 
-# --- 2. Завершення відповіді адміна ---
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "❌ Завершити відповідь")
 @safe_handler
 def handle_admin_end_reply(message):
@@ -408,15 +407,23 @@ def admin_reply_to_user(message):
         return
     admin_id = message.from_user.id
     user_id = get_admin_reply_target(admin_id)
+    info = r.get(f"user:{user_id}:info") or f"ID <code>{user_id}</code>"
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data=f"user_reply_{admin_id}"))
+    reply_text = (
+        f"💬 <b>Відповідь від адміністратора:</b>\n\n"
+        f"<b>Кому:</b> {html.escape(info)}\n"
+        f"{html.escape(message.text or '')}"
+    )
     safe_send(
         user_id,
-        Messages.ADMIN_REPLY.format(html.escape(message.text or "")),
+        reply_text,
         parse_mode='HTML',
         reply_markup=markup
     )
     safe_send(admin_id, "✅ Відповідь відправлена!", parse_mode="HTML", reply_markup=get_admin_reply_keyboard())
+    set_user_state(admin_id, UserStates.IDLE)
+    clear_admin_reply_target(admin_id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("user_reply_"))
 def user_reply_callback(call):
@@ -443,8 +450,6 @@ def user_reply_to_admin(message):
     safe_send(message.chat.id, "✅ Ваша відповідь адміністратору надіслана!", parse_mode="HTML")
     set_user_state(user_id, UserStates.IDLE)
 
-# --- АКТУАЛЬНІ адмін-кнопки ---
-
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
 @safe_handler
 def handle_admin_active_dialogs(message):
@@ -465,7 +470,13 @@ def handle_admin_active_dialogs(message):
 def handle_admin_users(message):
     users = [uid for uid in get_all_user_ids() if uid != config.ADMIN_ID]
     if users:
-        text = "👥 Список користувачів:\n\n" + "\n".join([f"• <code>{uid}</code>" for uid in users])
+        text = "👥 Список користувачів:\n\n"
+        for uid in users:
+            info = r.get(f"user:{uid}:info") or ""
+            if info:
+                text += f"• <code>{uid}</code> {info}\n"
+            else:
+                text += f"• <code>{uid}</code>\n"
     else:
         text = "👥 Користувачів не знайдено."
     safe_send(message.chat.id, text, parse_mode="HTML", reply_markup=get_admin_keyboard())
@@ -505,13 +516,15 @@ def handle_admin_broadcast_text(message):
     clear_admin_state(message.from_user.id)
     safe_send(message.chat.id, f"✅ Розсилку відправлено {count} користувачам.", parse_mode="HTML", reply_markup=get_admin_keyboard())
 
-# --- У catch-all хендлері нічого не ламаємо ---
+
+# --- ОНОВЛЕНИЙ CATCH-ALL ХЕНДЛЕР: легкий старт діалогу через повідомлення ---
 @bot.message_handler(func=lambda message: True)
 @safe_handler
 def handle_other_messages(message):
-    if get_user_state(message.from_user.id) in [UserStates.REPLY_TO_ADMIN, UserStates.REPLY_TO_USER]:
-        return
-    if is_admin(message.from_user.id):
+    user_id = message.from_user.id
+    user_state = get_user_state(user_id)
+
+    if is_admin(user_id):
         admin_buttons = ["📬 Активні діалоги", "👥 Користувачі", "📊 Статистика", "📢 Розсилка"]
         if message.text not in admin_buttons:
             safe_send(
@@ -520,13 +533,30 @@ def handle_other_messages(message):
                 reply_markup=get_admin_keyboard(),
                 parse_mode="HTML"
             )
-    else:
+        return
+
+    if user_state in [UserStates.REPLY_TO_ADMIN, UserStates.REPLY_TO_USER]:
+        return
+
+    # --- ПРОКАЧКА: якщо не у діалозі, але пише повідомлення — стартуємо діалог!
+    if user_state != UserStates.WAITING_FOR_MESSAGE:
+        set_user_state(user_id, UserStates.WAITING_FOR_MESSAGE)
         safe_send(
             message.chat.id,
-            Messages.USE_MENU_BUTTONS,
-            reply_markup=get_main_keyboard(),
-            parse_mode="HTML"
+            Messages.RECORDING_PROMPT,
+            parse_mode="HTML",
+            reply_markup=get_record_keyboard()
         )
+        handle_user_request(message)
+        return
+
+    # Якщо у діалозі — бот працює як раніше (можна додати додаткову логіку тут)
+    safe_send(
+        message.chat.id,
+        Messages.USE_MENU_BUTTONS,
+        reply_markup=get_main_keyboard(),
+        parse_mode="HTML"
+    )
 
 # -------- FLASK & SELF-PING --------
 app = Flask(__name__)
