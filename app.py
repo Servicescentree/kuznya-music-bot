@@ -145,13 +145,11 @@ def get_main_keyboard():
     )
     return markup
 
-# Додана клавіатура для діалогу запису треку
 def get_record_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(types.KeyboardButton("❌ Завершити діалог"))
     return markup
 
-# Додана клавіатура для відповіді адміна
 def get_admin_reply_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(types.KeyboardButton("❌ Завершити відповідь"))
@@ -346,7 +344,6 @@ def handle_record(message):
     safe_send(message.chat.id, Messages.RECORDING_PROMPT, parse_mode="HTML", reply_markup=get_record_keyboard())
     set_user_state(message.from_user.id, UserStates.WAITING_FOR_MESSAGE)
 
-# Додано: Обробник кнопки завершення діалогу
 @bot.message_handler(func=lambda m: m.text == "❌ Завершити діалог")
 @safe_handler
 def handle_end_dialog(message):
@@ -358,11 +355,9 @@ def handle_end_dialog(message):
         reply_markup=get_main_keyboard()
     )
 
-# Змінено: не скидаємо стейт у IDLE після кожного повідомлення
 @bot.message_handler(func=lambda m: get_user_state(m.from_user.id) == UserStates.WAITING_FOR_MESSAGE)
 @safe_handler
 def handle_user_request(message):
-    # Якщо користувач випадково відправив "❌ Завершити діалог", то нічого не робимо тут
     if message.text == "❌ Завершити діалог":
         return
     valid, err = validate_message(message)
@@ -378,7 +373,6 @@ def handle_user_request(message):
     markup.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data=f"admin_reply_{user_id}"))
     safe_send(config.ADMIN_ID, msg, parse_mode="HTML", reply_markup=markup)
     safe_send(message.chat.id, Messages.MESSAGE_SENT, parse_mode="HTML", reply_markup=get_record_keyboard())
-    # НЕ переводимо стан у IDLE — юзер може писати далі!
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_reply_"))
 def admin_reply_callback(call):
@@ -393,7 +387,6 @@ def admin_reply_callback(call):
         reply_markup=get_admin_reply_keyboard()
     )
 
-# Додано: Обробник завершення відповіді адміна
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "❌ Завершити відповідь")
 @safe_handler
 def handle_admin_end_reply(message):
@@ -406,12 +399,11 @@ def handle_admin_end_reply(message):
         reply_markup=get_admin_keyboard()
     )
 
-# Змінено: не скидаємо state у IDLE після кожної відповіді, адмін може писати далі
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_user_state(m.from_user.id) == UserStates.REPLY_TO_USER)
 @safe_handler
 def admin_reply_to_user(message):
     if message.text == "❌ Завершити відповідь":
-        return  # цим займається окремий хендлер
+        return
     admin_id = message.from_user.id
     user_id = get_admin_reply_target(admin_id)
     markup = types.InlineKeyboardMarkup()
@@ -423,7 +415,6 @@ def admin_reply_to_user(message):
         reply_markup=markup
     )
     safe_send(admin_id, "✅ Відповідь відправлена!", parse_mode="HTML", reply_markup=get_admin_reply_keyboard())
-    # НЕ скидаємо state, адмін може писати далі
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("user_reply_"))
 def user_reply_callback(call):
@@ -450,19 +441,42 @@ def user_reply_to_admin(message):
     safe_send(message.chat.id, "✅ Ваша відповідь адміністратору надіслана!", parse_mode="HTML")
     set_user_state(user_id, UserStates.IDLE)
 
+# === Нові хендлери для адмін-кнопок, щоб уникнути дублювання ===
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
+@safe_handler
+def handle_admin_active_dialogs(message):
+    safe_send(message.chat.id, "🔎 (Тут будуть активні діалоги)", parse_mode="HTML", reply_markup=get_admin_keyboard())
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
+@safe_handler
+def handle_admin_users(message):
+    safe_send(message.chat.id, "👥 (Тут будуть користувачі)", parse_mode="HTML", reply_markup=get_admin_keyboard())
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
+@safe_handler
+def handle_admin_stats(message):
+    safe_send(message.chat.id, "📊 (Тут буде статистика)", parse_mode="HTML", reply_markup=get_admin_keyboard())
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
+@safe_handler
+def handle_admin_broadcast(message):
+    safe_send(message.chat.id, "📢 (Тут буде меню розсилки)", parse_mode="HTML", reply_markup=get_admin_keyboard())
+
 @bot.message_handler(func=lambda message: True)
 @safe_handler
 def handle_other_messages(message):
-    # Не показуємо підказку, якщо тільки-но була відповідь адміну/користувачу
     if get_user_state(message.from_user.id) in [UserStates.REPLY_TO_ADMIN, UserStates.REPLY_TO_USER]:
         return
     if is_admin(message.from_user.id):
-        safe_send(
-            message.chat.id,
-            Messages.ADMIN_MENU_NAV,
-            reply_markup=get_admin_keyboard(),
-            parse_mode="HTML"
-        )
+        admin_buttons = ["📬 Активні діалоги", "👥 Користувачі", "📊 Статистика", "📢 Розсилка"]
+        if message.text not in admin_buttons:
+            safe_send(
+                message.chat.id,
+                Messages.ADMIN_MENU_NAV,
+                reply_markup=get_admin_keyboard(),
+                parse_mode="HTML"
+            )
     else:
         safe_send(
             message.chat.id,
@@ -606,3 +620,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.critical(f"Critical error: {e}", exc_info=True)
         exit(1)
+        
