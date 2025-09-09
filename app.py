@@ -441,18 +441,22 @@ def user_reply_to_admin(message):
     safe_send(message.chat.id, "✅ Ваша відповідь адміністратору надіслана!", parse_mode="HTML")
     set_user_state(user_id, UserStates.IDLE)
 
-# === Нові хендлери для адмін-кнопок (розносимо функціонал!) ===
+# === АКТУАЛЬНИЙ функціонал для адмін-кнопок ===
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
 @safe_handler
 def handle_admin_active_dialogs(message):
-    # Реальний функціонал для активних діалогів:
     active_users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
     if active_users:
-        text = "🔎 Активні діалоги:\n\n" + "\n".join([f"• <code>{uid}</code>" for uid in active_users])
+        markup = types.InlineKeyboardMarkup()
+        text = "<b>🔎 Активні діалоги:</b>\n\n"
+        for uid in active_users:
+            info = r.get(f"user:{uid}:info") or ""
+            text += f"• <code>{uid}</code> {info}\n"
+            markup.add(types.InlineKeyboardButton(f"Відповісти {uid}", callback_data=f"admin_reply_{uid}"))
+        safe_send(message.chat.id, text, parse_mode="HTML", reply_markup=markup)
     else:
-        text = "🔎 Немає активних діалогів зараз."
-    safe_send(message.chat.id, text, parse_mode="HTML", reply_markup=get_admin_keyboard())
+        safe_send(message.chat.id, "❌ <b>Зараз немає користувачів, які очікують відповіді.</b>", parse_mode="HTML", reply_markup=get_admin_keyboard())
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
 @safe_handler
@@ -475,7 +479,29 @@ def handle_admin_stats(message):
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
 @safe_handler
 def handle_admin_broadcast(message):
-    safe_send(message.chat.id, "📢 Меню розсилки: (реалізуй свою логіку!)", parse_mode="HTML", reply_markup=get_admin_keyboard())
+    users = get_all_user_ids()
+    text = (
+        f"📢 <b>Меню розсилки</b>\n\n"
+        f"Користувачів для розсилки: <b>{len(users)}</b>\n"
+        f"\n"
+        f"Відправте текст розсилки у відповідь на це повідомлення."
+    )
+    set_admin_state(message.from_user.id, BROADCAST_STATE)
+    safe_send(message.chat.id, text, parse_mode="HTML", reply_markup=get_admin_keyboard())
+
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_admin_state(m.from_user.id) == BROADCAST_STATE)
+@safe_handler
+def handle_admin_broadcast_text(message):
+    users = get_all_user_ids()
+    count = 0
+    for uid in users:
+        try:
+            safe_send(uid, f"📢 <b>Оголошення від студії:</b>\n\n{message.text}", parse_mode="HTML")
+            count += 1
+        except Exception:
+            continue
+    clear_admin_state(message.from_user.id)
+    safe_send(message.chat.id, f"✅ Розсилку відправлено {count} користувачам.", parse_mode="HTML", reply_markup=get_admin_keyboard())
 
 @bot.message_handler(func=lambda message: True)
 @safe_handler
