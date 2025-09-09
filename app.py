@@ -448,7 +448,7 @@ def user_reply_to_admin(message):
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
 @safe_handler
 def handle_admin_active_dialogs(message):
-    active_users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
+    active_users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE and uid != config.ADMIN_ID]
     if active_users:
         markup = types.InlineKeyboardMarkup()
         text = "<b>🔎 Активні діалоги:</b>\n\n"
@@ -463,7 +463,7 @@ def handle_admin_active_dialogs(message):
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
 @safe_handler
 def handle_admin_users(message):
-    users = get_all_user_ids()
+    users = [uid for uid in get_all_user_ids() if uid != config.ADMIN_ID]
     if users:
         text = "👥 Список користувачів:\n\n" + "\n".join([f"• <code>{uid}</code>" for uid in users])
     else:
@@ -473,7 +473,7 @@ def handle_admin_users(message):
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
 @safe_handler
 def handle_admin_stats(message):
-    total_users = len(get_all_user_ids())
+    total_users = len([uid for uid in get_all_user_ids() if uid != config.ADMIN_ID])
     total_requests = get_stat("user_requests")
     text = f"📊 <b>Статистика:</b>\n\nКористувачів: <b>{total_users}</b>\nЗаявок: <b>{total_requests}</b>"
     safe_send(message.chat.id, text, parse_mode="HTML", reply_markup=get_admin_keyboard())
@@ -481,11 +481,10 @@ def handle_admin_stats(message):
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
 @safe_handler
 def handle_admin_broadcast(message):
-    users = get_all_user_ids()
-    filtered_users = [u for u in users if u != config.ADMIN_ID]
+    users = [u for u in get_all_user_ids() if u != config.ADMIN_ID]
     text = (
         f"📢 <b>Меню розсилки</b>\n\n"
-        f"Користувачів для розсилки: <b>{len(filtered_users)}</b>\n"
+        f"Користувачів для розсилки: <b>{len(users)}</b>\n"
         f"\n"
         f"Відправте текст розсилки у відповідь на це повідомлення."
     )
@@ -495,11 +494,9 @@ def handle_admin_broadcast(message):
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_admin_state(m.from_user.id) == BROADCAST_STATE)
 @safe_handler
 def handle_admin_broadcast_text(message):
-    users = get_all_user_ids()
+    users = [uid for uid in get_all_user_ids() if uid != config.ADMIN_ID]
     count = 0
     for uid in users:
-        if uid == config.ADMIN_ID:
-            continue  # Пропускаємо адміна!
         try:
             safe_send(uid, f"📢 <b>Оголошення від студії:</b>\n\n{message.text}", parse_mode="HTML")
             count += 1
@@ -547,7 +544,7 @@ def health_check():
         <p><strong>Uptime:</strong> {uptime_hours}год {uptime_minutes}хв</p>
         <p><strong>Час запуску:</strong> {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(bot_start_time))}</p>
         <p><strong>Поточний час:</strong> {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
-        <p><strong>Користувачів:</strong> {len(get_all_user_ids())}</p>
+        <p><strong>Користувачів:</strong> {len([uid for uid in get_all_user_ids() if uid != config.ADMIN_ID])}</p>
         """
     except Exception as e:
         logger.error(f"Health page error: {e}", exc_info=True)
@@ -562,7 +559,7 @@ def health():
             "timestamp": time.time(),
             "uptime_seconds": int(time.time() - bot_start_time),
             "bot_username": bot_info.username,
-            "total_users": len(get_all_user_ids()),
+            "total_users": len([uid for uid in get_all_user_ids() if uid != config.ADMIN_ID]),
             "version": "3.0-admin-panel-redis"
         }), 200
     except Exception as e:
@@ -580,11 +577,11 @@ def ping():
 @app.route('/status')
 def status():
     try:
-        active_users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
+        active_users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE and uid != config.ADMIN_ID]
         return jsonify({
             "bot_status": "running",
             "uptime_seconds": int(time.time() - bot_start_time),
-            "total_users": len(get_all_user_ids()),
+            "total_users": len([uid for uid in get_all_user_ids() if uid != config.ADMIN_ID]),
             "active_chats": len(active_users),
             "admin_id": config.ADMIN_ID,
             "timestamp": time.time()
