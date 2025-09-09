@@ -482,9 +482,10 @@ def handle_admin_stats(message):
 @safe_handler
 def handle_admin_broadcast(message):
     users = get_all_user_ids()
+    filtered_users = [u for u in users if u != config.ADMIN_ID]
     text = (
         f"📢 <b>Меню розсилки</b>\n\n"
-        f"Користувачів для розсилки: <b>{len(users)}</b>\n"
+        f"Користувачів для розсилки: <b>{len(filtered_users)}</b>\n"
         f"\n"
         f"Відправте текст розсилки у відповідь на це повідомлення."
     )
@@ -497,6 +498,8 @@ def handle_admin_broadcast_text(message):
     users = get_all_user_ids()
     count = 0
     for uid in users:
+        if uid == config.ADMIN_ID:
+            continue  # Пропускаємо адміна!
         try:
             safe_send(uid, f"📢 <b>Оголошення від студії:</b>\n\n{message.text}", parse_mode="HTML")
             count += 1
