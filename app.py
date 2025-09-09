@@ -151,6 +151,12 @@ def get_record_keyboard():
     markup.add(types.KeyboardButton("❌ Завершити діалог"))
     return markup
 
+# Додана клавіатура для відповіді адміна
+def get_admin_reply_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(types.KeyboardButton("❌ Завершити відповідь"))
+    return markup
+
 def get_admin_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
@@ -380,11 +386,32 @@ def admin_reply_callback(call):
     user_id = int(call.data.replace("admin_reply_", ""))
     set_admin_reply_target(admin_id, user_id)
     set_user_state(admin_id, UserStates.REPLY_TO_USER)
-    safe_send(admin_id, f"Ви відповідаєте користувачу <code>{user_id}</code>. Напишіть текст:", parse_mode="HTML")
+    safe_send(
+        admin_id,
+        f"Ви відповідаєте користувачу <code>{user_id}</code>. Напишіть текст:",
+        parse_mode="HTML",
+        reply_markup=get_admin_reply_keyboard()
+    )
 
+# Додано: Обробник завершення відповіді адміна
+@bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "❌ Завершити відповідь")
+@safe_handler
+def handle_admin_end_reply(message):
+    set_user_state(message.from_user.id, UserStates.IDLE)
+    clear_admin_reply_target(message.from_user.id)
+    safe_send(
+        message.chat.id,
+        "✅ Ви завершили відповідь користувачу. Повернення у адмін-панель.",
+        parse_mode="HTML",
+        reply_markup=get_admin_keyboard()
+    )
+
+# Змінено: не скидаємо state у IDLE після кожної відповіді, адмін може писати далі
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and get_user_state(m.from_user.id) == UserStates.REPLY_TO_USER)
 @safe_handler
 def admin_reply_to_user(message):
+    if message.text == "❌ Завершити відповідь":
+        return  # цим займається окремий хендлер
     admin_id = message.from_user.id
     user_id = get_admin_reply_target(admin_id)
     markup = types.InlineKeyboardMarkup()
@@ -395,9 +422,8 @@ def admin_reply_to_user(message):
         parse_mode='HTML',
         reply_markup=markup
     )
-    safe_send(admin_id, "✅ Відповідь відправлена!", parse_mode="HTML")
-    clear_admin_reply_target(admin_id)
-    set_user_state(admin_id, UserStates.IDLE)
+    safe_send(admin_id, "✅ Відповідь відправлена!", parse_mode="HTML", reply_markup=get_admin_reply_keyboard())
+    # НЕ скидаємо state, адмін може писати далі
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("user_reply_"))
 def user_reply_callback(call):
