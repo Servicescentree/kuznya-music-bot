@@ -145,6 +145,12 @@ def get_main_keyboard():
     )
     return markup
 
+# Додана клавіатура для діалогу запису треку
+def get_record_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(types.KeyboardButton("❌ Завершити діалог"))
+    return markup
+
 def get_admin_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
@@ -331,12 +337,28 @@ def handle_contacts(message):
 @bot.message_handler(func=lambda m: m.text == "🎤 Записати трек")
 @safe_handler
 def handle_record(message):
-    safe_send(message.chat.id, Messages.RECORDING_PROMPT, parse_mode="HTML")
+    safe_send(message.chat.id, Messages.RECORDING_PROMPT, parse_mode="HTML", reply_markup=get_record_keyboard())
     set_user_state(message.from_user.id, UserStates.WAITING_FOR_MESSAGE)
 
+# Додано: Обробник кнопки завершення діалогу
+@bot.message_handler(func=lambda m: m.text == "❌ Завершити діалог")
+@safe_handler
+def handle_end_dialog(message):
+    set_user_state(message.from_user.id, UserStates.IDLE)
+    safe_send(
+        message.chat.id,
+        "✅ Діалог завершено. Ви повернулись у головне меню.",
+        parse_mode="HTML",
+        reply_markup=get_main_keyboard()
+    )
+
+# Змінено: не скидаємо стейт у IDLE після кожного повідомлення
 @bot.message_handler(func=lambda m: get_user_state(m.from_user.id) == UserStates.WAITING_FOR_MESSAGE)
 @safe_handler
 def handle_user_request(message):
+    # Якщо користувач випадково відправив "❌ Завершити діалог", то нічого не робимо тут
+    if message.text == "❌ Завершити діалог":
+        return
     valid, err = validate_message(message)
     if not valid:
         safe_send(message.chat.id, err, parse_mode="HTML")
@@ -349,8 +371,8 @@ def handle_user_request(message):
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data=f"admin_reply_{user_id}"))
     safe_send(config.ADMIN_ID, msg, parse_mode="HTML", reply_markup=markup)
-    safe_send(message.chat.id, Messages.MESSAGE_SENT, parse_mode="HTML")
-    set_user_state(message.from_user.id, UserStates.IDLE)
+    safe_send(message.chat.id, Messages.MESSAGE_SENT, parse_mode="HTML", reply_markup=get_record_keyboard())
+    # НЕ переводимо стан у IDLE — юзер може писати далі!
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_reply_"))
 def admin_reply_callback(call):
