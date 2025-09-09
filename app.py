@@ -441,27 +441,41 @@ def user_reply_to_admin(message):
     safe_send(message.chat.id, "✅ Ваша відповідь адміністратору надіслана!", parse_mode="HTML")
     set_user_state(user_id, UserStates.IDLE)
 
-# === Нові хендлери для адмін-кнопок, щоб уникнути дублювання ===
+# === Нові хендлери для адмін-кнопок (розносимо функціонал!) ===
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
 @safe_handler
 def handle_admin_active_dialogs(message):
-    safe_send(message.chat.id, "🔎 (Тут будуть активні діалоги)", parse_mode="HTML", reply_markup=get_admin_keyboard())
+    # Реальний функціонал для активних діалогів:
+    active_users = [uid for uid in get_all_user_ids() if get_user_state(uid) == UserStates.WAITING_FOR_MESSAGE]
+    if active_users:
+        text = "🔎 Активні діалоги:\n\n" + "\n".join([f"• <code>{uid}</code>" for uid in active_users])
+    else:
+        text = "🔎 Немає активних діалогів зараз."
+    safe_send(message.chat.id, text, parse_mode="HTML", reply_markup=get_admin_keyboard())
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "👥 Користувачі")
 @safe_handler
 def handle_admin_users(message):
-    safe_send(message.chat.id, "👥 (Тут будуть користувачі)", parse_mode="HTML", reply_markup=get_admin_keyboard())
+    users = get_all_user_ids()
+    if users:
+        text = "👥 Список користувачів:\n\n" + "\n".join([f"• <code>{uid}</code>" for uid in users])
+    else:
+        text = "👥 Користувачів не знайдено."
+    safe_send(message.chat.id, text, parse_mode="HTML", reply_markup=get_admin_keyboard())
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📊 Статистика")
 @safe_handler
 def handle_admin_stats(message):
-    safe_send(message.chat.id, "📊 (Тут буде статистика)", parse_mode="HTML", reply_markup=get_admin_keyboard())
+    total_users = len(get_all_user_ids())
+    total_requests = get_stat("user_requests")
+    text = f"📊 <b>Статистика:</b>\n\nКористувачів: <b>{total_users}</b>\nЗаявок: <b>{total_requests}</b>"
+    safe_send(message.chat.id, text, parse_mode="HTML", reply_markup=get_admin_keyboard())
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📢 Розсилка")
 @safe_handler
 def handle_admin_broadcast(message):
-    safe_send(message.chat.id, "📢 (Тут буде меню розсилки)", parse_mode="HTML", reply_markup=get_admin_keyboard())
+    safe_send(message.chat.id, "📢 Меню розсилки: (реалізуй свою логіку!)", parse_mode="HTML", reply_markup=get_admin_keyboard())
 
 @bot.message_handler(func=lambda message: True)
 @safe_handler
@@ -620,4 +634,3 @@ if __name__ == "__main__":
     except Exception as e:
         logger.critical(f"Critical error: {e}", exc_info=True)
         exit(1)
-        
