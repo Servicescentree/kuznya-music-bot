@@ -180,7 +180,8 @@ def validate_message(message):
     return True, ""
 
 def check_rate_limit(user_id: int) -> bool:
-    key = f"rate:{user_id}"
+    # Ліміт вимкнено
+    return
     try:
         pipe = r.pipeline()
         pipe.incr(key)
