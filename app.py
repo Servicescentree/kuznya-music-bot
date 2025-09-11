@@ -224,15 +224,11 @@ def admin_keyboard():
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
-def admin_inline_keyboard(user_id, dialog_id):
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="↩️ Відповісти", callback_data=f"admin_reply:{user_id}:{dialog_id}"),
-                InlineKeyboardButton(text="❌ Завершити діалог", callback_data=f"admin_end:{user_id}:{dialog_id}")
-            ]
-        ]
-    )
+def admin_dialog_keyboard():
+    keyboard = [
+        [KeyboardButton(text="❌ Завершити діалог")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 # --- Відправлення повідомлення користувача адміну з кнопками ---
 async def send_user_message_to_admin(user_id, full_name, message_text, dialog_id, message_db_id):
@@ -240,7 +236,13 @@ async def send_user_message_to_admin(user_id, full_name, message_text, dialog_id
         f"💬 <b>Діалог з {full_name}</b>\n\n"
         f"👤 {message_text}"
     )
-    keyboard = admin_inline_keyboard(user_id, dialog_id)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="↩️ Відповісти", callback_data=f"admin_reply:{user_id}:{dialog_id}")
+            ]
+        ]
+    )
     await bot.send_message(ADMIN_ID, admin_text, reply_markup=keyboard, parse_mode="HTML")
 
 async def send_admin_message_to_user(user_id, admin_text):
@@ -310,7 +312,6 @@ async def start_dialog_handler(message: types.Message, state: FSMContext):
 @dp.message(F.text == "❌ Завершити діалог")
 async def end_dialog_handler(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    # Для адміна — вихід зі стану відповіді, і завершення діалогу в БД
     if user_id == ADMIN_ID:
         data = await state.get_data()
         if not data or not data.get("user_id"):
@@ -324,7 +325,6 @@ async def end_dialog_handler(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    # Для юзера — як було раніше
     dialog = get_active_dialog(user_id)
     if not dialog:
         await message.answer("Ви не перебуваєте у діалозі.", reply_markup=main_keyboard())
@@ -346,7 +346,6 @@ async def user_dialog_message(message: types.Message, state: FSMContext):
     message_db_id = save_message(user_id=user_id, username=message.from_user.username, full_name=message.from_user.full_name, message_text=message.text, is_from_admin=False, dialog_id=dialog_id)
     await send_user_message_to_admin(user_id, message.from_user.full_name, message.text, dialog_id, message_db_id)
     await message.answer("✅ Повідомлення надіслано адміністратору.", reply_markup=dialog_keyboard())
-    # СТАН НЕ СКИДАЄМО — користувач у діалозі, може писати далі
 
 @dp.callback_query(F.data.startswith("admin_reply:"))
 async def admin_reply_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -359,7 +358,6 @@ async def admin_reply_callback(callback: types.CallbackQuery, state: FSMContext)
     except Exception:
         await callback.answer("Помилка в параметрах", show_alert=True)
         return
-    # Ставимо стан "адмін відповідає", але НЕ очищаємо його після відповіді!
     await state.set_state(AdminStates.replying_to_user)
     await state.update_data(user_id=user_id, dialog_id=dialog_id)
     user_info = get_user_info(user_id)
@@ -367,9 +365,9 @@ async def admin_reply_callback(callback: types.CallbackQuery, state: FSMContext)
     full_name = user_info[1] if user_info else ""
     await callback.message.answer(
         f"Ви відповідаєте користувачу:\n<b>{full_name}</b> (<a href='https://t.me/{username}'>@{username}</a>, id <code>{user_id}</code>)\n\n"
-        f"Напишіть текст відповіді. Щоб завершити діалог — натисніть кнопку '❌ Завершити діалог'.",
+        f"Напишіть текст відповіді або натисніть '❌ Завершити діалог'.",
         parse_mode="HTML",
-        reply_markup=admin_inline_keyboard(user_id, dialog_id)
+        reply_markup=admin_dialog_keyboard()
     )
     await callback.answer("Введіть відповідь користувачу...")
 
@@ -392,7 +390,6 @@ async def admin_end_dialog_callback(callback: types.CallbackQuery, state: FSMCon
 
 @dp.message(AdminStates.replying_to_user)
 async def admin_send_reply(message: types.Message, state: FSMContext):
-    # ОТУТ ГОЛОВНА ВІДМІННІСТЬ: не скидаємо стан, поки не буде команди на завершення!
     data = await state.get_data()
     user_id = data.get("user_id")
     dialog_id = data.get("dialog_id")
@@ -415,9 +412,8 @@ async def admin_send_reply(message: types.Message, state: FSMContext):
     await message.answer(
         f"Відповідь відправлено користувачу:\n<b>{full_name}</b> (<a href='https://t.me/{username}'>@{username}</a>, id <code>{user_id}</code>)",
         parse_mode="HTML",
-        reply_markup=admin_inline_keyboard(user_id, dialog_id)
+        reply_markup=admin_dialog_keyboard()
     )
-    # СТАН НЕ СКИДАЄМО, адмін може одразу писати наступну відповідь!
 
 @dp.message(F.text == "💬 Активні діалоги")
 async def admin_active_dialogs(message: types.Message, state: FSMContext):
@@ -523,7 +519,6 @@ async def admin_main_menu(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Повернуто у головне меню.", reply_markup=admin_keyboard())
 
-# --- Ось тут головна магія: юзер може просто написати — і діалог створиться! ---
 @dp.message()
 async def fallback(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -536,7 +531,6 @@ async def fallback(message: types.Message, state: FSMContext):
         await state.set_state(UserStates.in_dialog)
         await user_dialog_message(message, state)
     else:
-        # Якщо користувач просто написав — автоматично створюємо діалог!
         start_dialog(user_id, ADMIN_ID, message.from_user.username, message.from_user.full_name)
         await state.set_state(UserStates.in_dialog)
         dialog = get_active_dialog(user_id)
@@ -552,7 +546,6 @@ async def fallback(message: types.Message, state: FSMContext):
         await send_user_message_to_admin(user_id, message.from_user.full_name, message.text, dialog_id, message_db_id)
         await message.answer("✅ Ваше повідомлення надіслано адміністратору!", reply_markup=dialog_keyboard())
 
-# --- Запуск бота ---
 async def main():
     init_db()
     print("🚀 Consultant Bot запущено!")
