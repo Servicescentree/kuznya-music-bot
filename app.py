@@ -28,7 +28,7 @@ class BotConfig:
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
     WEBHOOK_PORT: int = int(os.environ.get('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
-    RATE_LIMIT_MESSAGES: int = 5
+    RATE_LIMIT_MESSAGES: int = 5   # <- залишено для сумісності, але не використовується
     WEBHOOK_URL: str = os.environ.get('WEBHOOK_URL', '')
 
 config = BotConfig()
@@ -175,22 +175,12 @@ def validate_message(message):
         return False, Messages.ERROR_INVALID_INPUT
     if len(message.text) > config.MAX_MESSAGE_LENGTH:
         return False, Messages.ERROR_MESSAGE_TOO_LONG
-    if not check_rate_limit(message.from_user.id):
-        return False, Messages.ERROR_RATE_LIMITED
+    # Rate-limit вимкнено
     return True, ""
 
 def check_rate_limit(user_id: int) -> bool:
-    # Ліміт вимкнено
-    return
-    try:
-        pipe = r.pipeline()
-        pipe.incr(key)
-        pipe.expire(key, 60)
-        count, _ = pipe.execute()
-        return count <= config.RATE_LIMIT_MESSAGES
-    except Exception as e:
-        logger.error(f"Redis error in check_rate_limit: {e}", exc_info=True)
-        return True
+    # Rate-limit вимкнено
+    return True
 
 def set_user_state(user_id: int, state: str):
     try:
