@@ -280,7 +280,7 @@ def format_admin_request(user, user_id, message_text, dt):
         f"{html.escape(message_text)}"
     )
 
-# -------- HANDLERИ (user/admin) --------
+# -------- HANDLERИ --------
 
 @bot.message_handler(func=lambda m: m.text == "❌ Завершити діалог")
 @safe_handler
@@ -336,19 +336,35 @@ def handle_examples(message):
         parse_mode="HTML"
     )
 
+# --- Підписка з перевіркою ---
 @bot.message_handler(func=lambda m: m.text == "📢 Підписатися")
 @safe_handler
 def handle_channel(message):
     markup = types.InlineKeyboardMarkup()
-    markup.add(
-        types.InlineKeyboardButton("🔥 Підписатися на канал", url=config.CHANNEL_URL)
-    )
+    markup.add(types.InlineKeyboardButton("🔥 Підписатися на канал", url=config.CHANNEL_URL))
+    markup.add(types.InlineKeyboardButton("✅ Я підписався!", callback_data="check_subscription"))
     safe_send(
         message.chat.id,
-        "📢 <b>Щоб не пропустити новини, знижки та бекстейдж — <u>підпишіться на наш Telegram-канал!</u></b>\n\nПісля підписки поверніться в бот для спілкування 😉",
+        "📢 <b>Щоб не пропустити новини, знижки та бекстейдж — <u>підпишіться на наш Telegram-канал!</u></b>\n\nПісля підписки натисніть 'Я підписався!' для перевірки.",
         parse_mode="HTML",
         reply_markup=markup
     )
+
+@bot.callback_query_handler(func=lambda call: call.data == "check_subscription")
+def callback_check_subscription(call):
+    user_id = call.from_user.id
+    channel_username = config.CHANNEL_URL.split("/")[-1]
+    try:
+        member = bot.get_chat_member(f"@{channel_username}", user_id)
+        if member.status in ["member", "administrator", "creator"]:
+            bot.answer_callback_query(call.id, "✅ Підписка підтверджена!")
+            bot.send_message(user_id, "✅ Дякуємо за підписку! Вам доступний увесь функціонал.", reply_markup=get_main_keyboard())
+        else:
+            bot.answer_callback_query(call.id, "❗️ Ви ще не підписані на канал!")
+            bot.send_message(user_id, "❗️ Ви ще не підписані на канал! Підпишіться та спробуйте ще раз.")
+    except Exception:
+        bot.answer_callback_query(call.id, "❗️ Не вдалося перевірити підписку.")
+        bot.send_message(user_id, "❗️ Не вдалося перевірити підписку. Можливо, ви не підписані, або виникла помилка.")
 
 @bot.message_handler(func=lambda m: m.text == "📲 Контакти")
 @safe_handler
