@@ -426,6 +426,7 @@ def user_reply_callback(call):
     admin_id = int(call.data.replace("user_reply_", ""))
     set_admin_reply_target(admin_id, user_id)
     set_user_state(user_id, UserStates.REPLY_TO_ADMIN)
+    # Додаємо кнопку завершити діалог при вході в режим відповіді адміну
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(types.KeyboardButton("❌ Завершити діалог"))
     safe_send(
@@ -458,6 +459,7 @@ def user_reply_to_admin(message):
         f"📝 <b>Повідомлення:</b>\n{html.escape(message.text or '')}"
     )
     safe_send(admin_id, reply_text, parse_mode="HTML", reply_markup=markup_inline)
+    # Щоб кнопка Завершити діалог не зникала після відповіді
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(types.KeyboardButton("❌ Завершити діалог"))
     safe_send(
