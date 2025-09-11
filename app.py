@@ -28,7 +28,7 @@ class BotConfig:
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
     WEBHOOK_PORT: int = int(os.environ.get('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
-    RATE_LIMIT_MESSAGES: int = 5   # залишено для сумісності, не використовується
+    RATE_LIMIT_MESSAGES: int = 5
     WEBHOOK_URL: str = os.environ.get('WEBHOOK_URL', '')
 
 config = BotConfig()
@@ -208,7 +208,7 @@ def add_user(user_id: int, user=None):
     try:
         set_user_state(user_id, UserStates.IDLE)
         if user:
-            info = f"{user.first_name or ''} {user.last_name or ''} @{user.username or ''}".strip()
+            info = f"{user.first_name or ''} {user.last_name or ''}".strip()
             r.set(f"user:{user_id}:info", info)
     except Exception as e:
         logger.error(f"Redis error in add_user: {e}", exc_info=True)
@@ -384,9 +384,15 @@ def admin_reply_callback(call):
     user_id = int(call.data.replace("admin_reply_", ""))
     set_admin_reply_target(admin_id, user_id)
     set_user_state(admin_id, UserStates.REPLY_TO_USER)
+    # Отримаємо info юзера (ім'я)
+    info = r.get(f"user:{user_id}:info") or ""
+    if info:
+        who = f"<b>{html.escape(info)}</b> (<code>{user_id}</code>)"
+    else:
+        who = f"<code>{user_id}</code>"
     safe_send(
         admin_id,
-        f"Ви відповідаєте користувачу <code>{user_id}</code>. Напишіть текст:",
+        f"Ви відповідаєте користувачу {who}. Напишіть текст:",
         parse_mode="HTML",
         reply_markup=get_admin_reply_keyboard()
     )
@@ -418,7 +424,6 @@ def admin_reply_to_user(message):
         parse_mode="HTML",
         reply_markup=get_admin_reply_keyboard()
     )
-    # Не змінюємо стан на IDLE, поки адмін не натисне "❌ Завершити відповідь"
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("user_reply_"))
 def user_reply_callback(call):
@@ -426,7 +431,6 @@ def user_reply_callback(call):
     admin_id = int(call.data.replace("user_reply_", ""))
     set_admin_reply_target(admin_id, user_id)
     set_user_state(user_id, UserStates.REPLY_TO_ADMIN)
-    # Додаємо кнопку завершити діалог при вході в режим відповіді адміну
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(types.KeyboardButton("❌ Завершити діалог"))
     safe_send(
@@ -459,7 +463,6 @@ def user_reply_to_admin(message):
         f"📝 <b>Повідомлення:</b>\n{html.escape(message.text or '')}"
     )
     safe_send(admin_id, reply_text, parse_mode="HTML", reply_markup=markup_inline)
-    # Щоб кнопка Завершити діалог не зникала після відповіді
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(types.KeyboardButton("❌ Завершити діалог"))
     safe_send(
@@ -468,7 +471,6 @@ def user_reply_to_admin(message):
         parse_mode="HTML",
         reply_markup=markup
     )
-    # Стан НЕ змінюємо! Користувач може далі писати адміну, поки не завершить діалог
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
 @safe_handler
@@ -551,7 +553,6 @@ def handle_admin_broadcast_text(message):
         reply_markup=get_admin_keyboard()
     )
 
-# --- ОНОВЛЕНИЙ CATCH-ALL ХЕНДЛЕР ---
 @bot.message_handler(func=lambda message: True)
 @safe_handler
 def handle_other_messages(message):
