@@ -339,13 +339,15 @@ def handle_examples(message):
 @bot.message_handler(func=lambda m: m.text == "📢 Підписатися")
 @safe_handler
 def handle_channel(message):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("🔥 Підписатися на канал", url=config.CHANNEL_URL)
+    )
     safe_send(
         message.chat.id,
-        Messages.CHANNEL_INFO.format(
-            html.escape(config.CHANNEL_URL),
-            html.escape(config.CHANNEL_URL)
-        ),
-        parse_mode="HTML"
+        "📢 <b>Щоб не пропустити новини, знижки та бекстейдж — <u>підпишіться на наш Telegram-канал!</u></b>\n\nПісля підписки поверніться в бот для спілкування 😉",
+        parse_mode="HTML",
+        reply_markup=markup
     )
 
 @bot.message_handler(func=lambda m: m.text == "📲 Контакти")
@@ -384,7 +386,6 @@ def admin_reply_callback(call):
     user_id = int(call.data.replace("admin_reply_", ""))
     set_admin_reply_target(admin_id, user_id)
     set_user_state(admin_id, UserStates.REPLY_TO_USER)
-    # Отримаємо info юзера (ім'я)
     info = r.get(f"user:{user_id}:info") or ""
     if info:
         who = f"<b>{html.escape(info)}</b> (<code>{user_id}</code>)"
