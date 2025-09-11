@@ -426,7 +426,14 @@ def user_reply_callback(call):
     admin_id = int(call.data.replace("user_reply_", ""))
     set_admin_reply_target(admin_id, user_id)
     set_user_state(user_id, UserStates.REPLY_TO_ADMIN)
-    safe_send(user_id, "Ви відповідаєте адміністратору. Напишіть текст:", parse_mode="HTML")
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(types.KeyboardButton("❌ Завершити діалог"))
+    safe_send(
+        user_id,
+        "Ви відповідаєте адміністратору. Напишіть текст або натисніть '❌ Завершити діалог' щоб завершити спілкування.",
+        parse_mode="HTML",
+        reply_markup=markup
+    )
 
 @bot.message_handler(func=lambda m: get_user_state(m.from_user.id) == UserStates.REPLY_TO_ADMIN)
 @safe_handler
@@ -442,16 +449,23 @@ def user_reply_to_admin(message):
         return
     user_id = message.from_user.id
     admin_id = config.ADMIN_ID
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data=f"admin_reply_{user_id}"))
+    markup_inline = types.InlineKeyboardMarkup()
+    markup_inline.add(types.InlineKeyboardButton("↩️ Відповісти", callback_data=f"admin_reply_{user_id}"))
     reply_text = (
         f"↩️ <b>Відповідь клієнта</b>\n"
         f"👤 <b>Клієнт:</b> <a href=\"tg://user?id={user_id}\">{html.escape(message.from_user.first_name or '')}</a>\n"
         f"🆔 <b>ID:</b> <code>{user_id}</code>\n\n"
         f"📝 <b>Повідомлення:</b>\n{html.escape(message.text or '')}"
     )
-    safe_send(admin_id, reply_text, parse_mode="HTML", reply_markup=markup)
-    safe_send(message.chat.id, "✅ Ваша відповідь адміністратору надіслана!", parse_mode="HTML")
+    safe_send(admin_id, reply_text, parse_mode="HTML", reply_markup=markup_inline)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add(types.KeyboardButton("❌ Завершити діалог"))
+    safe_send(
+        message.chat.id,
+        "✅ Ваша відповідь адміністратору надіслана!\n\nЩоб завершити діалог — натисніть '❌ Завершити діалог'.",
+        parse_mode="HTML",
+        reply_markup=markup
+    )
     # Стан НЕ змінюємо! Користувач може далі писати адміну, поки не завершить діалог
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
