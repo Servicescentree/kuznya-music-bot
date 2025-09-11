@@ -28,7 +28,7 @@ class BotConfig:
     EXAMPLES_URL: str = 'https://t.me/kuznya_music/41'
     WEBHOOK_PORT: int = int(os.environ.get('PORT', 8080))
     MAX_MESSAGE_LENGTH: int = 4000
-    RATE_LIMIT_MESSAGES: int = 5   # <- залишено для сумісності, але не використовується
+    RATE_LIMIT_MESSAGES: int = 5   # залишено для сумісності, не використовується
     WEBHOOK_URL: str = os.environ.get('WEBHOOK_URL', '')
 
 config = BotConfig()
@@ -175,11 +175,9 @@ def validate_message(message):
         return False, Messages.ERROR_INVALID_INPUT
     if len(message.text) > config.MAX_MESSAGE_LENGTH:
         return False, Messages.ERROR_MESSAGE_TOO_LONG
-    # Rate-limit вимкнено
     return True, ""
 
 def check_rate_limit(user_id: int) -> bool:
-    # Rate-limit вимкнено
     return True
 
 def set_user_state(user_id: int, state: str):
@@ -282,7 +280,7 @@ def format_admin_request(user, user_id, message_text, dt):
         f"{html.escape(message_text)}"
     )
 
-# -------- HANDLЕРИ (user/admin) --------
+# -------- HANDLERИ (user/admin) --------
 
 @bot.message_handler(func=lambda m: m.text == "❌ Завершити діалог")
 @safe_handler
@@ -420,8 +418,7 @@ def admin_reply_to_user(message):
         parse_mode="HTML",
         reply_markup=get_admin_reply_keyboard()
     )
-    set_user_state(admin_id, UserStates.IDLE)
-    clear_admin_reply_target(admin_id)
+    # Не змінюємо стан на IDLE, поки адмін не натисне "❌ Завершити відповідь"
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("user_reply_"))
 def user_reply_callback(call):
@@ -434,6 +431,15 @@ def user_reply_callback(call):
 @bot.message_handler(func=lambda m: get_user_state(m.from_user.id) == UserStates.REPLY_TO_ADMIN)
 @safe_handler
 def user_reply_to_admin(message):
+    if message.text == "❌ Завершити діалог":
+        set_user_state(message.from_user.id, UserStates.IDLE)
+        safe_send(
+            message.chat.id,
+            "✅ Діалог із адміністратором завершено. Ви повернулись у головне меню.",
+            parse_mode="HTML",
+            reply_markup=get_main_keyboard()
+        )
+        return
     user_id = message.from_user.id
     admin_id = config.ADMIN_ID
     markup = types.InlineKeyboardMarkup()
@@ -446,7 +452,7 @@ def user_reply_to_admin(message):
     )
     safe_send(admin_id, reply_text, parse_mode="HTML", reply_markup=markup)
     safe_send(message.chat.id, "✅ Ваша відповідь адміністратору надіслана!", parse_mode="HTML")
-    set_user_state(user_id, UserStates.IDLE)
+    # Стан НЕ змінюємо! Користувач може далі писати адміну, поки не завершить діалог
 
 @bot.message_handler(func=lambda m: is_admin(m.from_user.id) and m.text == "📬 Активні діалоги")
 @safe_handler
